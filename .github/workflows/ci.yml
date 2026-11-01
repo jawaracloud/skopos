@@ -1,8 +1,23 @@
 name: ci
 
+# Go-only trigger: docs, Helm values/schema, systemd units, and other
+# non-Go changes do not start this workflow. A PR that includes any Go change
+# still runs the full matrix.
 on:
   push:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "vendor/**"
+      - ".github/workflows/ci.yml"
   pull_request:
+    paths:
+      - "**/*.go"
+      - "go.mod"
+      - "go.sum"
+      - "vendor/**"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
