@@ -58,7 +58,7 @@ func (a *API) evaluateMetric(ctx context.Context, query Query, points []time.Tim
 		return nil, badMetricf("loki: evaluation timestamps are not ascending")
 	}
 
-	entries, err := a.Fetcher.FetchRange(ctx, start.Add(-query.Metric.Range), end)
+	entries, err := a.fetchRange(ctx, []Query{query}, start.Add(-query.Metric.Range), end)
 	if err != nil {
 		return nil, err
 	}
