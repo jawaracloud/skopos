@@ -22,6 +22,13 @@ schema_config:
       index:
         prefix: index_
         period: 24h
+ingester:
+  # The corpus uses fixed timestamps around the project date. Keep them in the
+  # ingester instead of flushing to the short-lived filesystem store before the
+  # harness queries them.
+  max_chunk_age: 24h
+  chunk_idle_period: 24h
+  flush_check_period: 30s
 limits_config:
   reject_old_samples: false
   allow_structured_metadata: true

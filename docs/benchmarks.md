@@ -81,22 +81,22 @@ and the per-column compressed/uncompressed sizes from `system.columns`.
 
 | Table | Rows | On disk (bytes) | Bytes/row on disk | Compressed data bytes/row | Compression ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `otel_logs` | 500,000 | 41,950,126 | 83.90 | 34.74 | 9.36x |
-| `otel_metrics_gauge` | 576,000 | 3,358,918 | 5.83 | 5.78 | 36.55x |
-| `otel_metrics_histogram` | 230,400 | 4,199,433 | 18.23 | 18.07 | 25.59x |
-| `otel_metrics_sum` | 1,152,000 | 8,023,686 | 6.97 | 6.93 | 34.15x |
-| `otel_traces` | 200,000 | 4,968,934 | 24.84 | 23.93 | 13.20x |
-| `otel_traces_trace_id_ts` (lookup) | 40,000 | 981,231 | 24.53 | n/a | n/a |
+| `otel_logs` | 500,000 | 41,959,871 | 83.92 | 34.75 | 9.36x |
+| `otel_metrics_gauge` | 576,000 | 3,362,361 | 5.84 | 5.78 | 36.52x |
+| `otel_metrics_histogram` | 230,400 | 4,207,172 | 18.26 | 18.11 | 25.54x |
+| `otel_metrics_sum` | 1,152,000 | 8,027,244 | 6.97 | 6.94 | 34.14x |
+| `otel_traces` | 200,000 | 4,915,314 | 24.58 | 23.68 | 13.34x |
+| `otel_traces_trace_id_ts` (lookup) | 40,000 | 981,782 | 24.54 | n/a | n/a |
 
 Per-signal totals for the main signal tables:
 
 | Signal | Rows | On disk (bytes) | Bytes/row on disk | Compressed data bytes/row |
 | --- | ---: | ---: | ---: | ---: |
-| Logs | 500,000 | 41,950,126 | **83.90** | **34.74** |
-| Metrics | 1,958,400 | 15,582,037 | **7.96** | **7.90** |
-| Traces | 200,000 | 4,968,934 | **24.84** | **23.93** |
+| Logs | 500,000 | 41,959,871 | **83.92** | **34.75** |
+| Metrics | 1,958,400 | 15,596,777 | **7.96** | **7.91** |
+| Traces | 200,000 | 4,915,314 | **24.58** | **23.68** |
 
-The trace lookup table adds about `981,231 / 200,000 = 4.91` bytes per span
+The trace lookup table adds about `981,782 / 200,000 = 4.91` bytes per span
 (one lookup row per trace, 40,000 rows for 200,000 spans).
 
 ### Interpretation
@@ -109,7 +109,7 @@ The trace lookup table adds about `981,231 / 200,000 = 4.91` bytes per span
   key, marks, and the schema's full-text/text indexes plus materialized
   Kubernetes columns. Capacity planning for the default 7-day log TTL should use
   the on-disk number, not the column-data number.
-- Traces cost about **24.8 bytes per span on disk** plus the trace lookup
+- Traces cost about **24.6 bytes per span on disk** plus the trace lookup
   index. This is consistent with the OTel Collector ClickHouse exporter's
   column layout.
 
@@ -122,16 +122,16 @@ milliseconds.
 
 | Query | p50 | p95 | p99* | min | max | Response bytes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `prom_instant_count` | 28.78 | 31.93 | 37.90 | 27.55 | 37.90 | 123 |
-| `prom_instant_by_service` | 28.99 | 36.51 | 44.69 | 27.14 | 44.69 | 235 |
-| `prom_histogram_p95` | 149.91 | 175.06 | 185.30 | 141.90 | 185.30 | 107 |
-| `prom_range_6h` | 428.94 | 477.12 | 727.22 | 417.96 | 727.22 | 10,904 |
-| `prom_series` | 85.89 | 94.64 | 100.76 | 83.51 | 100.76 | 31 |
-| `prom_label_values` | 1,459.88 | 1,561.29 | 1,597.58 | 1,389.50 | 1,597.58 | 280 |
-| `tempo_search` | 452.65 | 518.22 | 521.91 | 420.50 | 521.91 | 3,506 |
-| `tempo_trace_by_id` | 10.04 | 12.97 | 16.87 | 9.50 | 16.87 | 3,012 |
-| `tempo_tags` | 438.24 | 498.07 | 498.10 | 418.40 | 498.10 | 485 |
-| `loki_query_range` | 704.26 | 802.68 | 900.55 | 671.70 | 900.55 | 24,645 |
+| `prom_instant_count` | 32.86 | 40.81 | 43.15 | 30.75 | 43.15 | 123 |
+| `prom_instant_by_service` | 32.33 | 40.76 | 42.74 | 31.09 | 42.74 | 236 |
+| `prom_histogram_p95` | 154.91 | 206.73 | 267.80 | 150.29 | 267.80 | 107 |
+| `prom_range_6h` | 438.12 | 480.82 | 485.49 | 421.56 | 485.49 | 12,289 |
+| `prom_series` | 94.99 | 117.14 | 128.67 | 91.23 | 128.67 | 31 |
+| `prom_label_values` | 1,462.70 | 1,548.15 | 1,558.26 | 1,419.83 | 1,558.26 | 280 |
+| `tempo_search` | 451.26 | 553.99 | 613.27 | 426.03 | 613.27 | 20,709 |
+| `tempo_trace_by_id` | 9.35 | 12.58 | 12.69 | 9.06 | 12.69 | 3,012 |
+| `tempo_tags` | 442.88 | 524.76 | 528.57 | 429.41 | 528.57 | 623 |
+| `loki_query_range` | 722.53 | 831.17 | 873.47 | 663.06 | 873.47 | 24,645 |
 
 `*` With 30 samples, p99 is effectively the maximum. Treat it as such.
 
@@ -141,14 +141,14 @@ hours at a 60-second step; Tempo and Loki queries cover the last hour.
 
 ### Interpretation
 
-- Point lookups are fast: a trace by ID is about **10-13 ms p95** because it uses
+- Point lookups are fast: a trace by ID is about **9-13 ms p95** because it uses
   the trace ID bloom index and a narrow time range.
-- Simple Prometheus instant queries are about **29-37 ms p95** at this dataset
+- Simple Prometheus instant queries are about **33-41 ms p95** at this dataset
   size.
 - Queries that scan and aggregate a whole signal window are much slower:
-  Tempo search and tag discovery are **~0.5 s p95**, and Loki line filtering is
-  **~0.8 s p95**. These are alpha-path costs, not an SLO.
-- `prom_label_values` is the outlier at **~1.56 s p95**. The endpoint fetches
+  Tempo search and tag discovery are **~0.52-0.55 s p95**, and Loki line filtering is
+  **~0.83 s p95**. These are alpha-path costs, not an SLO.
+- `prom_label_values` is the outlier at **~1.55 s p95**. The endpoint fetches
   series across the gauge, sum, and histogram tables and deduplicates in Go; it
   is a candidate for pushing label discovery into ClickHouse before beta.
 - `tempo_search` and `tempo_tags` both fetch all spans in the requested range

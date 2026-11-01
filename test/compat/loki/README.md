@@ -71,3 +71,8 @@ multiples of `step`, with the first point rounded down and the last rounded up.
   explicit HTTP 400, which is covered by unit tests rather than this harness.
 - The reference container uses filesystem storage and a 24-hour retention
   period; it is not a production configuration.
+- The corpus uses fixed timestamps. The harness config keeps those chunks in
+  the ingester (`max_chunk_age`/`chunk_idle_period: 24h`) so the short-lived
+  container can query them. Refresh the corpus (`record`) or shift its
+  timestamps if running against a date more than 24 hours after the corpus
+  date.

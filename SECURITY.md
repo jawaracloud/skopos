@@ -47,6 +47,12 @@ compatibility guarantee and may receive security fixes only on the latest tag.
 - The OBI DaemonSet needs `hostPID` and host mounts. Treat it as a privileged
   node-level agent, even when running with capabilities instead of
   `privileged: true`.
+- OBI capability sufficiency is distribution-dependent. The real e2e harness
+  uses `privileged: true` because this host's container runtime/kernel policy
+  blocks some netns iterators even with the chart's capability set and
+  `seccomp=unconfined`. The capability-only path still produced HTTP
+  spans/metrics in testing, but validate it on your node runtime before
+  treating the chart's default as equivalent to privileged mode.
 - The alpha query APIs are implemented with narrow, published support lists.
   Do not put production data behind a gateway whose query semantics have not
   passed the beta compliance gates.

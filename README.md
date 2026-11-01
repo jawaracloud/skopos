@@ -14,16 +14,28 @@ The name comes from the Greek word for "watcher" or "target". It follows the
 CNCF tradition of naming observability projects after watchers and signals
 (Prometheus, Jaeger, Loki, Tempo).
 
+## Why Skopos
+
+Skopos is Apache-2.0, covers metrics, traces, and logs together, and keeps
+Grafana's native Prometheus, Loki, and Tempo datasources instead of requiring a
+new UI. It is built on OBI, the OpenTelemetry Collector, and ClickHouse, with no
+AGPL dependency and no per-agent vendor control plane. Unlike a PromQL-only
+gateway, it includes a Tempo- and Loki-compatible surface; unlike a
+ClickHouse-native observability UI, the dashboard layer remains the user's
+existing Grafana.
+
 ## Status
 
 | Component | Status | Notes |
 | --- | --- | --- |
-| Helm data plane (OBI, Collector, ClickHouse) | Alpha | M1 complete; `helm lint`/`helm template` and a k3d smoke test with a generator writing traces, metrics, and logs. OBI itself was not exercised in k3d (kernel/privilege constraints); its config was validated against the v1.0.0 binary. |
+| Helm data plane (OBI, Collector, ClickHouse) | Alpha | M1 complete; `helm lint`/`helm template`, a k3d generator smoke test, and a real OBI v1.0.0 eBPF e2e on kernel 6.18 (`make e2e-obi`, manual). |
 | Query core (plan IR, SQL emitter, ClickHouse HTTP client) | Alpha | M2: golden SQL, fuzz, unit, and real-ClickHouse integration tests. |
-| Prometheus-compatible API | Alpha | M3: `query`, `query_range`, `series`, `labels`, label values, metadata. See [docs/promql-support.md](docs/promql-support.md). |
-| Tempo-compatible API | Alpha | M4: search, trace by ID (JSON/protobuf), tags, tag values. See [docs/traceql-support.md](docs/traceql-support.md). |
-| Loki-compatible API | Alpha | M5: log query/query_range, labels, label values, series. See [docs/logql-support.md](docs/logql-support.md). |
+| Prometheus-compatible API | Alpha | M3: query/query_range, series, labels, metadata, summary metrics, set operators, group matching, and a 212-case differential oracle against the official Prometheus engine. See [docs/promql-support.md](docs/promql-support.md). |
+| Tempo-compatible API | Alpha | M4: search with spanSets, trace by ID (JSON/protobuf), tags/scopes, trace/span intrinsics, and a 55-case corpus compared with Tempo 2.7.2. See [docs/traceql-support.md](docs/traceql-support.md). |
+| Loki-compatible API | Alpha | M5: log queries, JSON/logfmt parser stages, label filters, `count_over_time`/`rate`, labels/series, and an 11-case corpus compared with Loki 3.5.7. See [docs/logql-support.md](docs/logql-support.md). |
 | Grafana datasource examples | Alpha-ready | All three datasource types point at the gateway. |
+| Benchmarks | Measured | Compression and p95 latency in [docs/benchmarks.md](docs/benchmarks.md). |
+| Release tooling | Scaffolded | SBOM fallback, signed-image hooks, chart package, and release workflow in [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
 TraceQL, and LogQL endpoints. Unsupported functions return an explicit error.
@@ -128,12 +140,16 @@ make fuzz                 # short anti-leak fuzz run
 make helm-lint            # helm lint
 make helm-template        # render the chart
 make check                # vet + test + fuzz + helm lint
+make e2e-obi              # real privileged OBI e2e (Docker, BTF, tracefs)
+make bench                # synthetic compression + latency benchmark
+make release-check        # vet/test/Helm/release script syntax
 ```
 
 The query-core tests live in `internal/sqlgen` (golden SQL and fuzzing),
 `internal/chclient` (HTTP client and ClickHouse integration), and
 `internal/httpapi` (health endpoints). The language heads have unit and
 integration tests in `internal/prom`, `internal/tempo`, and `internal/loki`.
+Reference harnesses live in `test/compat/` and corpora in `test/corpus/`.
 The Helm chart is in `deploy/helm/skopos`.
 
 ## Security
@@ -151,6 +167,8 @@ the internet. See [SECURITY.md](SECURITY.md) and [docs/install.md](docs/install.
 - [PromQL support](docs/promql-support.md)
 - [TraceQL support](docs/traceql-support.md)
 - [LogQL support](docs/logql-support.md)
+- [Benchmarks](docs/benchmarks.md)
+- [Release runbook](docs/release.md)
 - [Dependency and supply-chain policy](docs/dependencies.md)
 - [Contributing](CONTRIBUTING.md)
 

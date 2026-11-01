@@ -117,9 +117,9 @@ the gateway.
 | Tempo wire format requested by Grafana (JSON vs protobuf) | Verified from the Grafana Tempo datasource source: it requests `/api/v2/traces` with `Accept: application/protobuf` and falls back to `/api/traces` on 404. The v2 `TraceByIDResponse` envelope is encoded manually without importing Tempo's AGPL protos. | Replay against a real Grafana during the alpha release checklist. |
 | OBI in CI | OBI needs kernel 5.8+, BTF, and privileges; standard CI runners may not qualify. | Use an OTLP generator in CI and test OBI on a dedicated VM. |
 | Official PromQL parser dependency tree | Measured: 15 modules in the build, all Apache-2.0/BSD-3/MIT; vendored. | Re-check on every version bump. |
-| Real ClickHouse compression and cost | Not measured | M6. |
+| Real ClickHouse compression and cost | Measured: 7.96 B/metric sample, 83.92 B/log line, 24.58 B/span on disk; p95 latency table in docs/benchmarks.md. | Re-run on reference hardware before beta. |
 | Minimum supported ClickHouse version | Tested 26.8.36.3; logs use text indexes from 26.2. | Expand the test matrix before beta. |
-| Product differentiation versus cerberus, oteldb, ClickStack, and SigNoz | Not written | Add one sentence to README before release. |
+| Product differentiation versus cerberus, oteldb, ClickStack, and SigNoz | Written in README: Apache-2.0, three signals, Grafana-native datasources, OBI + Collector + ClickHouse, no AGPL, no vendor control plane. | Keep it factual as the competitive landscape changes. |
 
 ## Out of scope for v0.1
 
@@ -139,17 +139,25 @@ the gateway.
 M0-M5 alpha slices are implemented in the repository:
 
 - M0 foundation, M1 data plane, and M2 query core.
-- M3 PromQL head: selectors, matchers, counter functions, range aggregations,
-  `histogram_quantile`, basic math, scalar/vector and one-to-one vector/vector
-  operators, `offset`, and aggregations. Support list in
-  `docs/promql-support.md`.
-- M4 TraceQL head: single-spanset tag filters, tag search, tags/tag values, and
-  trace by ID in OTLP JSON and protobuf. Support list in
-  `docs/traceql-support.md`.
-- M5 LogQL head: stream selectors and line filters, labels, label values, and
-  series. Support list in `docs/logql-support.md`.
+- M3 PromQL head: selectors, matchers, counter functions with boundary
+  extrapolation, range aggregations, `histogram_quantile`, math, set operators,
+  group matching, `topk`/`bottomk`/`count_values`, absent/label functions,
+  summary metrics, and an explicit exponential-histogram error. A 212-case
+  differential oracle compares the engine with official Prometheus.
+- M4 TraceQL head: single-spanset filters, resource/span/event/link scopes,
+  trace/span intrinsics, tag search, tags/tag values, search spanSets, and trace
+  by ID in OTLP JSON and protobuf (including the v2 envelope). A 55-case corpus
+  is compared with Tempo 2.7.2.
+- M5 LogQL head: stream selectors, line filters, JSON/logfmt parser stages,
+  label filters, `count_over_time`/`rate`, `sum`/`sum by`, labels, label values,
+  and series. An 11-case corpus is compared with Loki 3.5.7.
+- M6: real compression and latency benchmarks are measured in
+  `docs/benchmarks.md`; the real OBI e2e passes on a privileged kernel 6.18
+  host.
+- M7: release scaffolding (SBOM fallback, chart package, optional cosign
+  signing, release workflow) is present. The alpha artifacts have not been
+  published or signed with project keys.
 
-The beta gates remain open: the full PromQL compliance tester, the Loki
-benchmark corpus, the in-house TraceQL corpus, and the three-way differential
-diff. OBI has not yet been exercised on a qualifying VM. M6 hardening and M7
-release packaging are still pending.
+The beta gates still open: the full Prometheus compliance tester, the complete
+Loki benchmark corpus, and the three-way differential diff against cerberus.
+The current corpus sizes are a subset, not the full gates.

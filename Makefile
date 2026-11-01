@@ -72,6 +72,7 @@ release-dry-run:
 
 release-check: vet test helm-lint
 	$(HELM) template skopos $(CHART) --namespace observability >/dev/null
+	cd test/compat/prometheus && $(GO) mod verify && $(GO) vet ./... && $(GO) test -count=1 ./...
 	sh -n scripts/release.sh
 	sh -n scripts/sbom-fallback.sh
 	sh -n test/e2e/obi/run.sh

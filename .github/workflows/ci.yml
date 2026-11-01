@@ -38,6 +38,12 @@ jobs:
         run: go test -race ./...
       - name: SQL emitter fuzz gate
         run: go test -run='^$' -fuzz=FuzzEmitNoUserValueLeak -fuzztime=30s ./internal/sqlgen
+      - name: PromQL differential oracle
+        working-directory: test/compat/prometheus
+        run: |
+          go mod verify
+          go vet ./...
+          go test -count=1 ./...
       - name: Install govulncheck
         run: "go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}"
       - name: govulncheck

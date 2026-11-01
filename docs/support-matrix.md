@@ -33,15 +33,22 @@ points all three datasource types at that service.
 ## Language support
 
 - **PromQL:** selectors, matchers, `rate`/`irate`/`increase` with boundary
-  extrapolation, range aggregations, `histogram_quantile`, basic math,
-  scalar/vector and one-to-one vector/vector binary operators, `offset`, and
-  the listed aggregations. Only gauge, sum, and classic histogram tables are
-  read; summary and exponential-histogram metrics are not yet queryable.
-- **TraceQL:** one spanset, `&&`/`||`, tag matchers, status/kind/duration
-  intrinsics, tag search, tags and tag values, trace by ID in OTLP JSON or
-  protobuf (v2 uses the Tempo `TraceByIDResponse` envelope).
-- **LogQL:** stream selectors and line filters. Parser stages and metric
-  queries are rejected.
+  extrapolation and counter resets, range aggregations, `histogram_quantile`,
+  math, set operators (`and`/`or`/`unless`), `group_left`/`group_right`,
+  `topk`/`bottomk`/`count_values`, `absent`/`absent_over_time`,
+  `label_replace`/`label_join`, scalar/vector and vector/vector binary
+  operators, `offset`, and summary metrics. Exponential histograms return an
+  explicit `bad_data` error. The PromQL differential oracle exercises 212
+  instant/range cases against the official Prometheus engine; it is not the
+  full Prometheus compliance tester.
+- **TraceQL:** one spanset with `&&`/`||`, resource/span/event/link/
+  instrumentation scopes, trace/span intrinsics, tag search, tags and tag
+  values, trace by ID in OTLP JSON or protobuf (v2 uses the Tempo
+  `TraceByIDResponse` envelope), and search `spanSets`. The 55-case corpus is
+  compared with Tempo 2.7.2 for the supported subset.
+- **LogQL:** stream selectors, line filters, `| json`, `| logfmt`, label
+  filters, and `count_over_time`/`rate` with `sum`/`sum by`. The 11-case corpus
+  is compared with Loki 3.5.7 for the supported subset.
 
 ## ClickHouse version
 
@@ -59,5 +66,11 @@ with the beta test matrix.
   something the chart can validate.
 - Query evaluation is in the gateway, not pushed down to ClickHouse. The row
   scan limit and 7-day range bound protect the single-node alpha deployment.
-- The language support lists are intentionally narrow and do not yet satisfy
-  the beta gates (full compliance tester, Loki corpus, three-way diff).
+- The language support lists are intentionally narrow. The current harnesses
+  cover a subset: PromQL differential oracle (212 cases), TraceQL corpus
+  (55 cases), and LogQL corpus (11 cases). The full Prometheus compliance
+  tester, the full Loki benchmark corpus, and the three-way diff against
+  cerberus remain beta gates.
+- The OBI e2e and release checks are manual because they need privileged eBPF
+  or signing credentials; normal CI covers build, unit, integration, fuzz,
+  Helm, and the PromQL differential oracle.
