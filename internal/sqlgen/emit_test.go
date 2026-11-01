@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 var update = flag.Bool("update", false, "update golden files")

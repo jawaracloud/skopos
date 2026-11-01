@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 func rangeOneHour() *plan.TimeRange {

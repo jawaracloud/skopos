@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/chclient"
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/chclient"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 // TestIntegrationEmittedSQL executes emitter output against a real ClickHouse

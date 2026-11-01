@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 func newTestClient(t *testing.T, h http.Handler, mutate func(*Config)) *Client {

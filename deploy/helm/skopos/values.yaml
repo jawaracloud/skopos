@@ -168,7 +168,7 @@ gateway:
   enabled: true
   replicaCount: 1
   image:
-    repository: ghcr.io/obi-wrapper/skopos-gateway
+    repository: ghcr.io/mrofisr/skopos-gateway
     tag: 0.1.0-alpha.1
     # Release values must set a digest. Local development may leave it empty.
     digest: ""

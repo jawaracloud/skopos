@@ -5,9 +5,9 @@ type: application
 version: 0.1.0-alpha.1
 appVersion: "0.1.0-alpha.1"
 kubeVersion: ">=1.27.0-0"
-home: https://github.com/obi-wrapper/skopos
+home: https://github.com/mrofisr/skopos
 sources:
-  - https://github.com/obi-wrapper/skopos
+  - https://github.com/mrofisr/skopos
 keywords:
   - observability
   - opentelemetry

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 // Limits bounds what the emitter will generate.

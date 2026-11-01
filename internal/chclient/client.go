@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/plan"
 )
 
 // Config configures a Client. All limits are sent to ClickHouse on every

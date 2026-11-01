@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/obi-wrapper/skopos/internal/chclient"
-	"github.com/obi-wrapper/skopos/internal/config"
-	"github.com/obi-wrapper/skopos/internal/httpapi"
+	"github.com/mrofisr/skopos/internal/chclient"
+	"github.com/mrofisr/skopos/internal/config"
+	"github.com/mrofisr/skopos/internal/httpapi"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

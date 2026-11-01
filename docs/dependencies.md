@@ -10,7 +10,7 @@ M0–M2 have **no non-standard-library runtime or test dependencies**. The modul
 is built from the Go standard library only:
 
 ```text
-github.com/obi-wrapper/skopos
+github.com/mrofisr/skopos
 ```
 
 `go.mod` and `go.sum` are committed. Vendoring becomes mandatory when the first

@@ -1,3 +1,3 @@
-module github.com/obi-wrapper/skopos
+module github.com/mrofisr/skopos
 
 go 1.27.3
