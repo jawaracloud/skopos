@@ -5,7 +5,6 @@
 package auth
 
 import (
-	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -14,11 +13,13 @@ import (
 
 const realm = "skopos"
 
-// Basic validates one username/password pair. The password is held as a
-// SHA-256 digest so the process does not retain the plaintext after startup.
+// Basic validates one username/password pair. The credential is held in
+// memory so Basic auth can compare it; it is supplied by the operator through
+// a Secret or environment variable and is never logged. Basic auth is only
+// safe over TLS.
 type Basic struct {
-	username [sha256.Size]byte
-	password [sha256.Size]byte
+	username string
+	password string
 }
 
 // New validates and constructs a Basic guard. Both values must be non-empty;
@@ -31,10 +32,7 @@ func New(username, password string) (*Basic, error) {
 	if password == "" {
 		return nil, errors.New("auth: password must not be empty")
 	}
-	return &Basic{
-		username: sha256.Sum256([]byte(username)),
-		password: sha256.Sum256([]byte(password)),
-	}, nil
+	return &Basic{username: username, password: password}, nil
 }
 
 // Wrap returns a handler that requires Basic auth except for the exact bypass
@@ -64,10 +62,8 @@ func (b *Basic) authorized(r *http.Request) bool {
 	if !ok {
 		return false
 	}
-	userHash := sha256.Sum256([]byte(username))
-	passHash := sha256.Sum256([]byte(password))
-	userOK := subtle.ConstantTimeCompare(b.username[:], userHash[:])
-	passOK := subtle.ConstantTimeCompare(b.password[:], passHash[:])
+	userOK := subtle.ConstantTimeCompare([]byte(b.username), []byte(username))
+	passOK := subtle.ConstantTimeCompare([]byte(b.password), []byte(password))
 	return userOK&passOK == 1
 }
 
