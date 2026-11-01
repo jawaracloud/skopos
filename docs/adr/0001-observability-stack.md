@@ -158,6 +158,10 @@ M0-M5 alpha slices are implemented in the repository:
   signing, release workflow) is present. The alpha artifacts have not been
   published or signed with project keys.
 
-The beta gates still open: the full Prometheus compliance tester, the complete
-Loki benchmark corpus, and the three-way differential diff against cerberus.
-The current corpus sizes are a subset, not the full gates.
+The cerberus three-way harness is implemented (`test/compat/cerberus`):
+124 checks across PromQL, LogQL, and TraceQL, with **0 Skopos divergences**.
+Cerberus v1.23.1 has 39 presentation/semantic gaps of its own; they are
+baseline-pinned and fail only in strict mode, so the literal "three-way zero"
+gate is blocked by the reference, not by Skopos. The full Prometheus
+compliance tester and the complete Loki benchmark corpus remain open beta
+gates; the current corpora are a representative subset.

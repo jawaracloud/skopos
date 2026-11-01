@@ -7,7 +7,7 @@ VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi bench release release-dry-run release-check
+.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus bench release release-dry-run release-check
 
 help:
 	@printf '%s\n' \
@@ -21,6 +21,7 @@ help:
 		'helm-lint         lint the Helm chart' \
 		'helm-template     render the Helm chart' \
 		'e2e-obi           run the real OBI end-to-end harness (Docker, Linux)' \
+		'compat-cerberus   run the cerberus three-way differential' \
 		'bench             run the ClickHouse compression and gateway latency benchmark' \
 		'release           build and package release artifacts (VERSION=...)' \
 		'release-dry-run   release build without pushing or signing' \
@@ -60,6 +61,9 @@ check: vet test helm-lint fuzz
 
 e2e-obi:
 	./test/e2e/obi/run.sh
+
+compat-cerberus:
+	./test/compat/cerberus/run.sh
 
 bench:
 	./test/bench/run.sh

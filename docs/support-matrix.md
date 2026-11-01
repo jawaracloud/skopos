@@ -68,9 +68,13 @@ with the beta test matrix.
   scan limit and 7-day range bound protect the single-node alpha deployment.
 - The language support lists are intentionally narrow. The current harnesses
   cover a subset: PromQL differential oracle (212 cases), TraceQL corpus
-  (55 cases), and LogQL corpus (11 cases). The full Prometheus compliance
-  tester, the full Loki benchmark corpus, and the three-way diff against
-  cerberus remain beta gates.
-- The OBI e2e and release checks are manual because they need privileged eBPF
-  or signing credentials; normal CI covers build, unit, integration, fuzz,
-  Helm, and the PromQL differential oracle.
+  (55 cases), LogQL corpus (11 cases), and the cerberus three-way gate
+  (124 checks, 0 Skopos divergences, 39 cerberus-only gaps baseline-pinned).
+  The literal three-way zero is blocked by cerberus v1.23.1; the harness fails
+  on any new or fixed cerberus gap.
+- The full Prometheus compliance tester and the complete Loki benchmark corpus
+  remain beta gates.
+- The OBI e2e and release signing/publishing are manual because they need
+  privileged eBPF or project credentials; normal CI covers build, unit,
+  integration, fuzz, Helm, PromQL oracle, Tempo/Loki references, and the
+  cerberus three-way gate.

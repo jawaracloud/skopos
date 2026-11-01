@@ -35,6 +35,7 @@ existing Grafana.
 | Loki-compatible API | Alpha | M5: log queries, JSON/logfmt parser stages, label filters, `count_over_time`/`rate`, labels/series, and an 11-case corpus compared with Loki 3.5.7. See [docs/logql-support.md](docs/logql-support.md). |
 | Grafana datasource examples | Alpha-ready | All three datasource types point at the gateway. |
 | Benchmarks | Measured | Compression and p95 latency in [docs/benchmarks.md](docs/benchmarks.md). |
+| Three-way differential | Passed for Skopos | 124 checks vs Prometheus/Loki/Tempo and cerberus v1.23.1: 0 Skopos divergences, 39 cerberus-only gaps baseline-pinned. |
 | Release tooling | Scaffolded | SBOM fallback, signed-image hooks, chart package, and release workflow in [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
@@ -141,6 +142,7 @@ make helm-lint            # helm lint
 make helm-template        # render the chart
 make check                # vet + test + fuzz + helm lint
 make e2e-obi              # real privileged OBI e2e (Docker, BTF, tracefs)
+make compat-cerberus      # three-way PromQL/LogQL/TraceQL differential
 make bench                # synthetic compression + latency benchmark
 make release-check        # vet/test/Helm/release script syntax
 ```

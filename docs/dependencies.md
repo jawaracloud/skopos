@@ -76,6 +76,8 @@ Reference implementations are test-only containers, pinned in their harnesses:
 | --- | --- | --- | --- |
 | Tempo reference | `grafana/tempo` | `2.7.2` | pinned in `test/compat/tempo/` |
 | Loki reference | `grafana/loki` | `3.5.7` | `sha256:0eaee7bf39cc83aaef46914fb58f287d4f4c4be6ec96b86c2ed55719a75e49c8` |
+| cerberus reference | `ghcr.io/tsouza/cerberus` | `v1.23.1` | `sha256:e5ced00b1ee85c371295147ed0bce9caa4a5c5554443ee8aabc329d5351dc4a5` |
+| Prometheus reference | `prom/prometheus` | `v3.15.1` | `sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2` |
 
 The Skopos gateway image is built from this repository. The default chart uses a
 tag for local development; release values must set
