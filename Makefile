@@ -94,6 +94,7 @@ release-check: vet test helm-lint
 	sh -n test/e2e/obi/render-schema.sh
 	sh -n test/e2e/obi/init-clickhouse.sh
 	sh -n test/integration/s3/run.sh
+	sh -n deploy/systemd/render-schema.sh
 	sh -n test/bench/run.sh
 	sh -n test/bench/measure-compression.sh
 	@printf '%s\n' 'release-check: ok'

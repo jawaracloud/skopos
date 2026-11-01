@@ -1,0 +1,44 @@
+[Unit]
+Description=Skopos internal query worker
+Documentation=https://github.com/jawaracloud/skopos/blob/main/docs/systemd.md
+After=network-online.target
+Wants=network-online.target
+# If ClickHouse runs as a local systemd unit, add:
+# After=clickhouse-server.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=skopos
+Group=skopos
+EnvironmentFile=/etc/skopos/query.env
+ExecStart=/usr/local/bin/skopos-gateway
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=20s
+SyslogIdentifier=skopos-query
+UMask=0027
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RemoveIPC=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

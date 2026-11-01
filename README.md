@@ -40,6 +40,7 @@ existing Grafana.
 | Three-way differential | Passed for Skopos | 124 checks vs Prometheus/Loki/Tempo and cerberus v1.23.1: 0 Skopos divergences, 39 cerberus-only gaps baseline-pinned. |
 | Distributed read path | Alpha | Optional public frontend plus stateless query workers (`distributed.enabled=true`); the frontend has no ClickHouse credentials. |
 | Basic authentication | Optional | `auth.enabled=true` protects query/version routes with one operator-managed credential; `/healthz` and `/readyz` stay open for probes. Use TLS. |
+| systemd deployment | Alpha | Unit files for single-process and frontend/query split, local schema renderer, and a full operations guide in [docs/systemd.md](docs/systemd.md). |
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
 | OpenSSF | Measured, public | Official Scorecard action reports **7.8** and publishes the badge. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
@@ -231,6 +232,7 @@ gateway to the internet without TLS and an authenticating edge. See
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
 - [ADR 0002: distributed read path](docs/adr/0002-distributed-read-path.md)
 - [Installation and operations](docs/install.md)
+- [Running the gateway with systemd](docs/systemd.md)
 - [Tiered storage and backups](docs/storage.md)
 - [Helm chart repository](docs/chart-repository.md)
 - [Support matrix](docs/support-matrix.md)

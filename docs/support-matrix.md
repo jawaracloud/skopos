@@ -35,6 +35,7 @@ example points all three datasource types at that service.
 | Mode | Status | Notes |
 | --- | --- | --- |
 | Single process (`gateway.mode=all`) | Default | One Deployment serves all three APIs and connects to ClickHouse. |
+| systemd (`deploy/systemd/`) | Alpha | Same binary and schema under systemd; supports single-process or frontend/query split units. No Kubernetes policy/HPA. |
 | Distributed read path (`distributed.enabled=true`) | Alpha | Public frontend proxies to internal stateless query workers. The frontend has no ClickHouse credentials. |
 | Tiered S3 retention (`clickhouse.storage.enabled=true`) | Alpha | Hot local parts move to an S3-compatible cold volume; cold parts stay queryable. |
 | Scheduled backups (`clickhouse.backup.enabled=true`) | Alpha | `BACKUP DATABASE ... TO S3(...)` CronJob to a separate prefix. Backups are restore-only, not queryable through the gateway. |

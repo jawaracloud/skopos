@@ -4,6 +4,10 @@
 > and Loki query APIs. Unsupported functions return explicit errors; see the
 > per-language support lists. Do not expose this installation to the internet.
 
+For a non-Kubernetes host, see [Running Skopos as a systemd
+service](systemd.md). The systemd path uses the same gateway binary and
+ClickHouse schema, but manages the unit and schema directly.
+
 ## Prerequisites
 
 - Kubernetes 1.27+.
