@@ -7,11 +7,12 @@ VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus storage-test bench release release-dry-run release-check scorecard
+.PHONY: help build mcp test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus storage-test bench release release-dry-run release-check scorecard
 
 help:
 	@printf '%s\n' \
 		'build             build the gateway binary' \
+		'mcp               build the stdio MCP server' \
 		'test              run unit tests' \
 		'test-race         run unit tests with the race detector' \
 		'test-integration  run integration tests (requires CLICKHOUSE_URL)' \
@@ -33,6 +34,10 @@ help:
 build:
 	mkdir -p bin
 	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/gateway ./cmd/gateway
+
+mcp:
+	mkdir -p bin
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o bin/skopos-mcp ./cmd/skopos-mcp
 
 test:
 	$(GO) test ./...
