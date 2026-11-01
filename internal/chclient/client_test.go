@@ -168,6 +168,7 @@ func TestQueryAcceptsReadStatementsWithComments(t *testing.T) {
 		"SELECT 'insert into x' AS s",
 		"SELECT `insert` FROM system.tables LIMIT 1",
 		"SELECT 1 /* DROP TABLE x */",
+		"SELECT 1 WHERE x = {insert:String}",
 	} {
 		if _, err := c.Query(context.Background(), sql, nil); err != nil {
 			t.Errorf("Query(%q): %v", sql, err)

@@ -2,6 +2,8 @@
 -- opentelemetry-collector-contrib v0.164.0.
 --
 -- The exporter is configured with create_schema: false. This job owns DDL.
+-- Columns and types match the pinned exporter; indexes and TTL are customized
+-- as permitted by the exporter's schema-management documentation.
 -- ClickHouse 26.8 is tested; the logs table uses full-text indexes that
 -- require ClickHouse 26.2+.
 

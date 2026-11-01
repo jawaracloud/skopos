@@ -67,6 +67,15 @@ spec:
         - protocol: TCP
           port: {{ .Values.collector.service.httpPort }}
     {{- end }}
+    {{- with .Values.networkPolicy.collector.allowFrom }}
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.collector.service.grpcPort }}
+        - protocol: TCP
+          port: {{ $.Values.collector.service.httpPort }}
+    {{- end }}
 ---
 {{- end }}
 {{- if .Values.gateway.enabled }}

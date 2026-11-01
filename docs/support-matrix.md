@@ -13,9 +13,10 @@ empty or incorrect result.
 | Logs | Collector OTLP receiver (enabled); filelog receiver not bundled | `otel_logs` | Not implemented (M5 LogQL) | Alpha |
 
 OBI does not emit logs. The default chart accepts logs through the Collector's
-OTLP receiver, as verified in the k3d smoke test. A filelog receiver is not
-bundled; enabling one requires verifying the receiver component and its maturity
-first.
+OTLP receiver. A manual k3d smoke test sent traces, metrics, and logs through
+the Collector and read them back from ClickHouse; this is not yet an automated
+chart test. A filelog receiver is not bundled; enabling one requires verifying
+the receiver component and its maturity first.
 
 ## Gateway endpoints
 
@@ -34,6 +35,10 @@ The per-language supported-function lists will be published in
 `docs/promql-support.md`, `docs/traceql-support.md`, and
 `docs/logql-support.md` when M3–M5 land. Until then, the only honest answer is
 that the language heads are not implemented.
+
+The gateway parses the configurable database and table names at startup. The
+M3–M5 heads will build the plan schema from them; the current health-only server
+does not query ClickHouse except for `/readyz`.
 
 ## ClickHouse version
 

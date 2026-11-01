@@ -20,12 +20,15 @@
   documentation before enabling trace-context propagation or network
   observability.
 
-## Install
+## Install the data plane
+
+The gateway image is not published yet. Install the data plane first:
 
 ```sh
 helm install skopos ./deploy/helm/skopos \
   --namespace observability \
-  --create-namespace
+  --create-namespace \
+  --set gateway.enabled=false
 ```
 
 The init job waits for ClickHouse, creates the pinned schema, and creates the
@@ -33,7 +36,28 @@ read-only gateway user. If the job fails, inspect its logs before retrying:
 
 ```sh
 kubectl -n observability logs job/skopos-clickhouse-init
+kubectl -n observability get pods
 ```
+
+## Build and enable the gateway
+
+```sh
+docker build -t skopos-gateway:0.1.0-alpha.1 .
+# k3d:
+k3d image import -c <cluster> skopos-gateway:0.1.0-alpha.1
+# kind:
+# kind load docker-image skopos-gateway:0.1.0-alpha.1
+
+helm upgrade skopos ./deploy/helm/skopos --namespace observability \
+  --set gateway.enabled=true \
+  --set gateway.image.repository=skopos-gateway \
+  --set gateway.image.tag=0.1.0-alpha.1 \
+  --set gateway.image.digest= \
+  --set gateway.image.pullPolicy=IfNotPresent
+```
+
+For a real cluster, push the image to a registry and set the repository, tag,
+and digest. Release values must set `gateway.image.digest`.
 
 Check health:
 
@@ -53,7 +77,7 @@ The important values are:
 | Value | Default | Meaning |
 | --- | --- | --- |
 | `clickhouse.database` | `otel` | Database name. Validated as an SQL identifier. |
-| `clickhouse.tables.*` | `otel_*` | Table names used by the DDL, Collector, and gateway. Validated as SQL identifiers. |
+| `clickhouse.tables.*` | `otel_*` | Table names used by the DDL, Collector, and gateway. Validated as SQL identifiers. The gateway parses them now; the M3–M5 query heads consume them. |
 | `clickhouse.ttl.tracesDays` | `7` | Trace and trace-lookup TTL in days. |
 | `clickhouse.ttl.logsDays` | `7` | Log TTL in days. |
 | `clickhouse.ttl.metricsDays` | `30` | Metrics TTL in days. |
@@ -64,6 +88,7 @@ The important values are:
 | `gateway.image.digest` | `""` | Release images must set this. |
 | `networkPolicy.enabled` | `true` | Component ingress NetworkPolicies. |
 | `networkPolicy.gateway.allowFrom` | `[{namespaceSelector: {}}]` | Namespace/label selectors allowed to reach the gateway. Empty means no ingress. Tighten this to your Grafana namespace. |
+| `networkPolicy.collector.allowFrom` | `[{namespaceSelector: {}}]` | Namespace/label selectors allowed to send OTLP to the Collector. Tighten this to the namespaces that emit telemetry. |
 
 The chart generates ClickHouse admin and gateway passwords into a Secret. It
 reuses the existing Secret on upgrade through `lookup`; do not delete it while
@@ -114,9 +139,11 @@ authenticating proxy, TLS, and rate limiting before applying it, and tighten
 - The default gateway NetworkPolicy allows pods from any namespace to reach port
   8080. Tighten `networkPolicy.gateway.allowFrom` to your Grafana namespace.
   Setting it to an empty list denies all ingress.
-- The Collector and ClickHouse are reachable only from the components that need
-  them by default. The v0.1 policies restrict ingress; egress restrictions are
-  part of the M6 hardening work.
+- The Collector accepts OTLP from any namespace by default so applications and
+  log forwarders can send telemetry. Tighten
+  `networkPolicy.collector.allowFrom` to the emitting namespaces. ClickHouse is
+  reachable only from the Collector, gateway, and init job. The v0.1 policies
+  restrict ingress; egress restrictions are part of the M6 hardening work.
 - OBI mounts host paths and needs `hostPID`. Treat it as a privileged agent.
 
 ## Upgrade and uninstall

@@ -847,11 +847,19 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "allowObi"
+            "allowObi",
+            "allowFrom"
           ],
           "properties": {
             "allowObi": {
               "type": "boolean"
+            },
+            "allowFrom": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": true
+              }
             }
           }
         },

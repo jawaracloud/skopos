@@ -94,6 +94,12 @@ Check the data plane:
 
 ```sh
 kubectl -n observability get pods
+kubectl -n observability get pvc
+```
+
+After enabling the gateway, check its health:
+
+```sh
 kubectl -n observability port-forward svc/skopos-gateway 8080:8080
 curl -s http://127.0.0.1:8080/healthz
 curl -s http://127.0.0.1:8080/readyz

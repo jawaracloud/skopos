@@ -28,7 +28,7 @@ These tools are not linked into the gateway binary:
 | --- | --- | --- |
 | Go | 1.27.x | Build and test |
 | Helm | 3.19+ or 4.x | Chart lint and render |
-| govulncheck | v1.1.4 | Vulnerability scan (binary mode; see note below) |
+| govulncheck | v1.9.0 | Vulnerability scan |
 | Docker | any current release | ClickHouse integration tests |
 
 ## Pinned container images
@@ -51,9 +51,11 @@ that digest.
 
 The ClickHouse DDL mirrors the ClickHouse exporter schema from
 `open-telemetry/opentelemetry-collector-contrib` at tag `v0.164.0`, the same
-version as the pinned Collector image. The DDL lives in the chart ConfigMap and
-is executed by the init job. The exporter is configured with
-`create_schema: false` so only one process owns schema changes.
+version as the pinned Collector image. Columns and types match that version;
+indexes and TTL are customized as permitted by the exporter's schema-management
+documentation. The DDL lives in the chart ConfigMap and is executed by the init
+job. The exporter is configured with `create_schema: false` so only one process
+owns schema changes.
 
 ## Release security
 
@@ -66,9 +68,3 @@ implemented in the M0–M2 scaffold:
 - A separate, reviewed dependency and image version-bump workflow.
 - `govulncheck` and module checksum verification as blocking CI gates (the
   current CI runs both).
-
-`govulncheck` v1.1.4 is the latest available release, but its source-mode SSA
-analysis panics on Go 1.27 (`*ast.KeyValueExpr`). CI therefore builds the
-gateway and runs `govulncheck -mode=binary`. This checks the modules actually
-linked into the gateway. Move back to source mode when a govulncheck release
-supports Go 1.27 source analysis.

@@ -499,6 +499,14 @@ func containsWriteKeyword(sql string) bool {
 			i = skipQuoted(sql, i, '"')
 		case '`':
 			i = skipQuoted(sql, i, '`')
+		case '{':
+			// ClickHouse query parameter placeholder: {name:Type}. The type
+			// can contain parentheses but not a closing brace.
+			if n := strings.IndexByte(sql[i:], '}'); n >= 0 {
+				i += n + 1
+			} else {
+				i++
+			}
 		case '-':
 			if i+1 < len(sql) && sql[i+1] == '-' {
 				if n := strings.IndexByte(sql[i+2:], '\n'); n >= 0 {

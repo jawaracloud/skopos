@@ -17,10 +17,10 @@ help:
 		'test-integration  run integration tests (requires CLICKHOUSE_URL)' \
 		'fuzz              run the SQL emitter fuzz target for 30s' \
 		'vet               run go vet' \
-		'vuln              build the gateway and run govulncheck in binary mode' \
+		'vuln              run govulncheck' \
 		'helm-lint         lint the Helm chart' \
 		'helm-template     render the Helm chart' \
-		'check             vet + test + helm lint'
+		'check             vet + test + fuzz + helm lint'
 
 build:
 	mkdir -p bin
@@ -43,8 +43,7 @@ vet:
 	$(GO) vet ./...
 
 vuln:
-	$(GO) build -o /tmp/skopos-gateway ./cmd/gateway
-	$(GOVULNCHECK) -mode=binary /tmp/skopos-gateway
+	$(GOVULNCHECK) ./...
 
 helm-lint:
 	$(HELM) lint $(CHART)

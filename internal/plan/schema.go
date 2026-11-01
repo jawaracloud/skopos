@@ -107,12 +107,12 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"Duration":           ColumnNumber,
 				"StatusCode":         ColumnString,
 				"StatusMessage":      ColumnString,
-				"Events.Timestamp":   ColumnDateTime,
-				"Events.Name":        ColumnString,
+				"Events.Timestamp":   ColumnArray,
+				"Events.Name":        ColumnArray,
 				"Events.Attributes":  ColumnArray,
-				"Links.TraceId":      ColumnString,
-				"Links.SpanId":       ColumnString,
-				"Links.TraceState":   ColumnString,
+				"Links.TraceId":      ColumnArray,
+				"Links.SpanId":       ColumnArray,
+				"Links.TraceState":   ColumnArray,
 				"Links.Attributes":   ColumnArray,
 			},
 		},
@@ -198,8 +198,8 @@ func DefaultSchema(database string, names TableNames) *Schema {
 			Columns: metricColumns(map[string]ColumnType{
 				"Count":                     ColumnNumber,
 				"Sum":                       ColumnNumber,
-				"ValueAtQuantiles.Quantile": ColumnNumber,
-				"ValueAtQuantiles.Value":    ColumnNumber,
+				"ValueAtQuantiles.Quantile": ColumnArray,
+				"ValueAtQuantiles.Value":    ColumnArray,
 			}, false),
 		},
 	}
@@ -239,11 +239,11 @@ func metricColumns(extra map[string]ColumnType, exemplars bool) map[string]Colum
 		"Flags":                 ColumnNumber,
 	}
 	if exemplars {
-		cols["Exemplars.FilteredAttributes"] = ColumnMap
-		cols["Exemplars.TimeUnix"] = ColumnDateTime
-		cols["Exemplars.Value"] = ColumnNumber
-		cols["Exemplars.SpanId"] = ColumnString
-		cols["Exemplars.TraceId"] = ColumnString
+		cols["Exemplars.FilteredAttributes"] = ColumnArray
+		cols["Exemplars.TimeUnix"] = ColumnArray
+		cols["Exemplars.Value"] = ColumnArray
+		cols["Exemplars.SpanId"] = ColumnArray
+		cols["Exemplars.TraceId"] = ColumnArray
 	}
 	for k, v := range extra {
 		cols[k] = v

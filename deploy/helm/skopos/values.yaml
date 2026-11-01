@@ -232,6 +232,10 @@ networkPolicy:
     allowInitJob: true
   collector:
     allowObi: true
+    # OTLP clients (applications and log forwarders) may live in other
+    # namespaces. Tighten this to the namespaces that send telemetry.
+    allowFrom:
+      - namespaceSelector: {}
   obi:
     denyIngress: true
 
