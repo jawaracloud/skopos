@@ -19,6 +19,74 @@ func (f fakeFetcher) FetchRange(context.Context, time.Time, time.Time) ([]LogEnt
 	return f.entries, nil
 }
 
+type recordingFetcher struct {
+	entries []LogEntry
+	calls   [][]Query
+}
+
+func (f *recordingFetcher) FetchRange(context.Context, time.Time, time.Time) ([]LogEntry, error) {
+	return f.entries, nil
+}
+
+func (f *recordingFetcher) FetchQueries(_ context.Context, queries []Query, _, _ time.Time) ([]LogEntry, error) {
+	copied := make([]Query, len(queries))
+	copy(copied, queries)
+	f.calls = append(f.calls, copied)
+	return f.entries, nil
+}
+
+func TestAPIUsesParsedQueriesForPushdown(t *testing.T) {
+	entries := []LogEntry{
+		{Timestamp: time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), Body: "request timeout", Labels: map[string]string{"service_name": "checkout"}},
+	}
+	fetcher := &recordingFetcher{entries: entries}
+	api := NewAPI(fetcher, "test-version")
+	api.Now = func() time.Time { return time.Date(2026, 11, 1, 0, 10, 0, 0, time.UTC) }
+	mux := http.NewServeMux()
+	api.Register(mux)
+
+	query := url.QueryEscape(`{service_name="checkout"} |= "timeout"`)
+	rec := do(t, mux, `/loki/api/v1/query_range?query=`+query+`&start=1793491200&end=1793491500`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("query_range = %d %s", rec.Code, rec.Body)
+	}
+	if len(fetcher.calls) != 1 || len(fetcher.calls[0]) != 1 {
+		t.Fatalf("query fetch calls = %#v", fetcher.calls)
+	}
+	got := fetcher.calls[0][0]
+	if len(got.Matchers) != 1 || got.Matchers[0].Name != "service_name" || got.Matchers[0].Value != "checkout" {
+		t.Fatalf("pushed matchers = %#v", got.Matchers)
+	}
+	if len(got.Stages) != 1 {
+		t.Fatalf("pushed stages = %#v", got.Stages)
+	}
+	if filter, ok := got.Stages[0].(LineFilter); !ok || filter.Op != "|=" || filter.Value != "timeout" {
+		t.Fatalf("pushed line filter = %#v", got.Stages[0])
+	}
+
+	values := url.Values{}
+	values.Add("match[]", `{service_name="checkout"}`)
+	values.Add("match[]", `{severity_text="ERROR"}`)
+	rec = do(t, mux, `/loki/api/v1/labels?`+values.Encode())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("labels = %d %s", rec.Code, rec.Body)
+	}
+	if len(fetcher.calls) != 2 || len(fetcher.calls[1]) != 2 {
+		t.Fatalf("labels fetch calls = %#v", fetcher.calls)
+	}
+
+	rec = do(t, mux, `/loki/api/v1/series?query=`+url.QueryEscape(`{service_name="checkout"} | json`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("series = %d %s", rec.Code, rec.Body)
+	}
+	if len(fetcher.calls) != 3 || len(fetcher.calls[2]) != 1 || len(fetcher.calls[2][0].Stages) != 1 {
+		t.Fatalf("series fetch calls = %#v", fetcher.calls)
+	}
+	if _, ok := fetcher.calls[2][0].Stages[0].(ParserStage); !ok {
+		t.Fatalf("series parser stage = %#v", fetcher.calls[2][0].Stages[0])
+	}
+}
+
 func testAPI(t *testing.T) (http.Handler, []LogEntry) {
 	t.Helper()
 	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)

@@ -21,6 +21,13 @@ type LogFetcher interface {
 	FetchRange(ctx context.Context, start, end time.Time) ([]LogEntry, error)
 }
 
+// QueryFetcher is an optional storage surface that can push a parsed selector
+// and line filters into the backend. Implementations must return a superset of
+// the matching rows; the API always applies Query.Evaluate afterwards.
+type QueryFetcher interface {
+	FetchQueries(ctx context.Context, queries []Query, start, end time.Time) ([]LogEntry, error)
+}
+
 // API serves the Loki-compatible endpoints used by Grafana.
 type API struct {
 	Fetcher    LogFetcher
@@ -56,6 +63,16 @@ func (a *API) now() time.Time {
 	return time.Now()
 }
 
+// fetchRange asks a pushdown-capable fetcher for the union of queries and
+// falls back to an unfiltered time-range fetch otherwise. Evaluation in Go is
+// always applied by the caller.
+func (a *API) fetchRange(ctx context.Context, queries []Query, start, end time.Time) ([]LogEntry, error) {
+	if fetcher, ok := a.Fetcher.(QueryFetcher); ok {
+		return fetcher.FetchQueries(ctx, queries, start, end)
+	}
+	return a.Fetcher.FetchRange(ctx, start, end)
+}
+
 func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form: "+err.Error())
@@ -80,7 +97,7 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	entries, err := a.Fetcher.FetchRange(r.Context(), start, end)
+	entries, err := a.fetchRange(r.Context(), []Query{query}, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -324,7 +341,7 @@ func (a *API) handleLabels(w http.ResponseWriter, r *http.Request) {
 	if len(selectors) == 0 {
 		selectors = []Query{{}}
 	}
-	entries, err := a.Fetcher.FetchRange(r.Context(), start, end)
+	entries, err := a.fetchRange(r.Context(), selectors, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -370,7 +387,7 @@ func (a *API) handleLabelValues(w http.ResponseWriter, r *http.Request) {
 	if len(selectors) == 0 {
 		selectors = []Query{{}}
 	}
-	entries, err := a.Fetcher.FetchRange(r.Context(), start, end)
+	entries, err := a.fetchRange(r.Context(), selectors, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -412,7 +429,7 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "match[] or query is required")
 		return
 	}
-	entries, err := a.Fetcher.FetchRange(r.Context(), start, end)
+	entries, err := a.fetchRange(r.Context(), selectors, start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

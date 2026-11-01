@@ -41,6 +41,83 @@ ending at that time; without `time` it uses the last hour.
 `start`/`end` accept RFC3339, Unix seconds, milliseconds, microseconds, or
 nanoseconds; Grafana's nanosecond values are supported.
 
+## Query pushdown
+
+The ClickHouse log fetcher pushes a subset of the selector and pipeline into
+SQL. Pushdown is only a pre-filter: the gateway still evaluates the parsed
+query in Go on every returned row, so results are unchanged when a predicate
+cannot be pushed or when an index is unavailable.
+
+Pushed into `WHERE`:
+
+- Stream selectors on the exporter columns `service_name` -> `ServiceName`,
+  `severity_text` -> `SeverityText`, `trace_id` -> `TraceId`, `span_id` ->
+  `SpanId`, and `event_name` -> `EventName`. `=` and `!=` compare the column
+  directly; `=~` and `!~` use ClickHouse `match` with the same anchored
+  `^(?:...)$` pattern the Go evaluator compiles.
+- All line filters: `|=` -> `position(Body, ?) > 0`, `!=` ->
+  `position(Body, ?) = 0`, `|~` -> `match(Body, ?)`, `!~` ->
+  `NOT match(Body, ?)`. `position` and Go `strings.Contains` are byte-exact and
+  case-sensitive; `match` and Go `regexp` are RE2-family.
+- Multiple selectors on the labels, label-values, and series endpoints are
+  pushed as an OR only when every selector has a pushable predicate. If any
+  selector is unconstrained (for example it filters only an attribute or an
+  extracted label), the endpoint falls back to the unfiltered range.
+
+Not pushed:
+
+- Parser stages (`| json`, `| logfmt`) and label filters. They depend on
+  extracted labels whose normalization and resource/log precedence are
+  implemented in Go.
+- Selectors on resource or log attributes (for example `k8s_pod_name`), even
+  when a matching materialized column exists, until that normalization and
+  precedence can be reproduced exactly.
+- A regex that ClickHouse cannot compile. The fetcher retries the unfiltered
+  query when ClickHouse returns a regex compilation error, so a Go-valid
+  pattern never becomes a query error.
+
+Known-column predicates include an extra `column = ''` arm. The exporter's
+dedicated column is authoritative when it is non-empty, but `addAttributes`
+fills an empty built-in label from `ResourceAttributes` and then
+`LogAttributes`; keeping empty-column rows in the candidate set preserves that
+fallback for the Go evaluator.
+
+The API decodes ClickHouse JSON, which replaces invalid UTF-8 bytes with
+U+FFFD, while ClickHouse predicates see the raw bytes. Regex filters (and
+substring or selector values that contain U+FFFD) are therefore guarded with
+`NOT isValidUTF8(...)`: rows with invalid bytes stay in the candidate set and
+the Go evaluator decides. For regex filters this makes a text index a hint
+rather than an exact skip, because ClickHouse must also read rows with invalid
+UTF-8.
+
+### Index dependencies
+
+`match(Body, ...)` can use a case-sensitive full-text index on `Body`:
+
+```sql
+INDEX idx_body Body TYPE text(tokenizer = 'splitByNonAlpha')
+```
+
+The Helm schema defines this index. Existing deployments that predate it must
+add and materialize it:
+
+```sql
+ALTER TABLE <database>.<logs_table>
+    ADD INDEX idx_body Body TYPE text(tokenizer = 'splitByNonAlpha');
+ALTER TABLE <database>.<logs_table> MATERIALIZE INDEX idx_body;
+```
+
+ClickHouse uses this index only when it can extract complete tokens from the
+pattern (for example a phrase or anchored literal words); an unanchored
+`match(Body, 'timeout')` is a substring regex and may still scan. `position`
+substring filters are exact but do not use the text index at all.
+`idx_lower_body` is not used by LogQL because `|=`, `|~`, and their negations
+are case-sensitive.
+
+Pushdown reduces rows read, but the gateway still applies the full selector,
+parser stages, label filters, and metric aggregation in Go, and still enforces
+the row scan limit.
+
 ## Parser stages
 
 ### `| json`
@@ -191,10 +268,15 @@ Other limits:
 - Unit tests for selectors, line filters, parser stages, label filters,
   extraction collisions, numeric comparisons, missing labels, regex anchoring,
   metric parsing, step alignment, zero-sample omission, limits, and errors.
+- Pushdown tests for every matcher and line-filter operator, missing columns,
+  multiple selectors, parameterization, and ClickHouse parameter escaping.
 - API tests for streams, metrics, instant vectors, labels, label values,
   series, `query`/`match[]` filters, limits, direction, and unsupported queries.
 - Integration tests against ClickHouse 26.8 with real `otel_logs` rows,
-  including JSON/logfmt parsing and metric queries.
+  including JSON/logfmt parsing and metric queries. The pushdown suite runs the
+  same requests through the API with and without pushdown and requires
+  byte-identical responses, including rows with invalid UTF-8; an EXPLAIN test
+  also checks `idx_body` usage for a tokenizable `match` predicate.
 - Deterministic corpus: `test/corpus/logql/corpus.json`, checked by
   `internal/loki.TestLogQLCorpus` and by the real-Loki differential harness.
 - Differential harness: `test/compat/loki/run.sh verify` (Docker + Python 3);

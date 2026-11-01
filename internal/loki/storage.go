@@ -2,6 +2,7 @@ package loki
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -41,27 +42,29 @@ func NewClickHouseFetcher(client *chclient.Client, schema *plan.Schema, names pl
 	return &ClickHouseFetcher{Client: client, Schema: schema, Emitter: emitter, Names: names, MaxRows: maxRows}, nil
 }
 
-// FetchRange returns log entries in [start, end].
+// FetchRange returns log entries in [start, end] without pushdown.
 func (f *ClickHouseFetcher) FetchRange(ctx context.Context, start, end time.Time) ([]LogEntry, error) {
-	query := plan.Query{
-		Signal: plan.SignalLogs,
-		Table:  f.Names.Logs,
-		Select: []plan.SelectItem{
-			{Expr: plan.Col("Timestamp")},
-			{Expr: plan.Col("Body")},
-			{Expr: plan.Col("ServiceName")},
-			{Expr: plan.Col("SeverityText")},
-			{Expr: plan.Col("SeverityNumber")},
-			{Expr: plan.Col("TraceId")},
-			{Expr: plan.Col("SpanId")},
-			{Expr: plan.Col("EventName")},
-			{Expr: plan.Col("LogAttributes")},
-			{Expr: plan.Col("ResourceAttributes")},
-		},
-		TimeColumn: "Timestamp",
-		TimeRange:  &plan.TimeRange{Start: start, End: end, EndInclusive: true},
-		Limit:      f.MaxRows,
+	return f.FetchQueries(ctx, nil, start, end)
+}
+
+// FetchQueries returns the rows that may match any of queries in [start, end].
+// It pushes stream selectors on known columns and body line filters into SQL.
+// The returned rows are a superset of the matches: the caller must still run
+// Query.Evaluate, which remains the final authority.
+func (f *ClickHouseFetcher) FetchQueries(ctx context.Context, queries []Query, start, end time.Time) ([]LogEntry, error) {
+	where := buildPushdownPredicate(f.Schema, f.Names.Logs, queries)
+	entries, err := f.fetch(ctx, where, start, end)
+	if err == nil || where == nil || !isRegexCompileError(err) {
+		return entries, err
 	}
+	// Go and ClickHouse both use RE2, but if ClickHouse rejects a pattern the
+	// Go parser accepted, fall back to the unfiltered fetch rather than
+	// turning a working query into an error.
+	return f.fetch(ctx, nil, start, end)
+}
+
+func (f *ClickHouseFetcher) fetch(ctx context.Context, where plan.Expr, start, end time.Time) ([]LogEntry, error) {
+	query := f.logPlan(where, start, end)
 	emitted, err := f.Emitter.Emit(query)
 	if err != nil {
 		return nil, fmt.Errorf("loki: build log query: %w", err)
@@ -118,6 +121,37 @@ func (f *ClickHouseFetcher) FetchRange(ctx context.Context, start, end time.Time
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+func (f *ClickHouseFetcher) logPlan(where plan.Expr, start, end time.Time) plan.Query {
+	return plan.Query{
+		Signal: plan.SignalLogs,
+		Table:  f.Names.Logs,
+		Select: []plan.SelectItem{
+			{Expr: plan.Col("Timestamp")},
+			{Expr: plan.Col("Body")},
+			{Expr: plan.Col("ServiceName")},
+			{Expr: plan.Col("SeverityText")},
+			{Expr: plan.Col("SeverityNumber")},
+			{Expr: plan.Col("TraceId")},
+			{Expr: plan.Col("SpanId")},
+			{Expr: plan.Col("EventName")},
+			{Expr: plan.Col("LogAttributes")},
+			{Expr: plan.Col("ResourceAttributes")},
+		},
+		Where:      where,
+		TimeColumn: "Timestamp",
+		TimeRange:  &plan.TimeRange{Start: start, End: end, EndInclusive: true},
+		Limit:      f.MaxRows,
+	}
+}
+
+// isRegexCompileError reports whether ClickHouse rejected an RE2 pattern. Go
+// and ClickHouse share the same regexp family, but the fallback keeps a query
+// working if a construction accepted by one engine is rejected by the other.
+func isRegexCompileError(err error) bool {
+	var clickhouseError *chclient.Error
+	return errors.As(err, &clickhouseError) && clickhouseError.Code == "427"
 }
 
 func addAttributes(labels map[string]string, attrs map[string]string) {
