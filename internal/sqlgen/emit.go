@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/plan"
 )
 
 // Limits bounds what the emitter will generate.

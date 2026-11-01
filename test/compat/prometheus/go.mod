@@ -1,9 +1,9 @@
-module github.com/mrofisr/skopos/test/compat/prometheus
+module github.com/jawaracloud/skopos/test/compat/prometheus
 
 go 1.27.3
 
 require (
-	github.com/mrofisr/skopos v0.0.0
+	github.com/jawaracloud/skopos v0.0.0
 	github.com/prometheus/prometheus v0.315.1
 )
 
@@ -52,4 +52,4 @@ require (
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
 
-replace github.com/mrofisr/skopos => ../../..
+replace github.com/jawaracloud/skopos => ../../..

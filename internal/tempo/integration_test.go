@@ -18,8 +18,8 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/plan"
 )
 
 func minInt(a, b int) int {

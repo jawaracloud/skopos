@@ -1,7 +1,7 @@
 # PromQL differential harness
 
 This is a separate Go module. It links the official Prometheus `promql` engine
-and compares it with `github.com/mrofisr/skopos/internal/prom` over one
+and compares it with `github.com/jawaracloud/skopos/internal/prom` over one
 deterministic series set. Keeping it out of the main module means the gateway's
 `vendor/` tree and dependency set do not change.
 
@@ -13,7 +13,7 @@ go mod tidy   # only needed after changing imports
 go test ./...
 ```
 
-The module uses `replace github.com/mrofisr/skopos => ../../..`, so it always
+The module uses `replace github.com/jawaracloud/skopos => ../../..`, so it always
 tests the local worktree.
 
 ## What is compared

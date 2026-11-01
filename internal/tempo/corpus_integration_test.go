@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/plan"
-	corpus "github.com/mrofisr/skopos/test/corpus/traceql"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/plan"
+	corpus "github.com/jawaracloud/skopos/test/corpus/traceql"
 )
 
 func TestIntegrationTraceQLCorpus(t *testing.T) {

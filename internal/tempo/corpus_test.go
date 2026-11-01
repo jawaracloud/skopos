@@ -14,7 +14,7 @@ import (
 	tracev1 "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/proto"
 
-	corpus "github.com/mrofisr/skopos/test/corpus/traceql"
+	corpus "github.com/jawaracloud/skopos/test/corpus/traceql"
 )
 
 func loadCorpusSpans(t *testing.T) (*corpus.Corpus, []Span) {

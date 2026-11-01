@@ -12,9 +12,9 @@ import (
 
 	promlabels "github.com/prometheus/prometheus/model/labels"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/plan"
-	"github.com/mrofisr/skopos/internal/sqlgen"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/sqlgen"
 )
 
 // ClickHouseFetcher loads gauge, sum, and histogram samples from ClickHouse.

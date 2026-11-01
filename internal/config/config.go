@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/plan"
 )
 
 // Config is the gateway runtime configuration.

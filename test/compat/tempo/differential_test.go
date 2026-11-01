@@ -25,8 +25,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/tempo"
-	corpus "github.com/mrofisr/skopos/test/corpus/traceql"
+	"github.com/jawaracloud/skopos/internal/tempo"
+	corpus "github.com/jawaracloud/skopos/test/corpus/traceql"
 )
 
 func TestDifferential(t *testing.T) {

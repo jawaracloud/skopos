@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/plan"
-	"github.com/mrofisr/skopos/internal/sqlgen"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/sqlgen"
 )
 
 // Span is one trace span decoded from ClickHouse.

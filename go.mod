@@ -1,4 +1,4 @@
-module github.com/mrofisr/skopos
+module github.com/jawaracloud/skopos
 
 go 1.27.3
 

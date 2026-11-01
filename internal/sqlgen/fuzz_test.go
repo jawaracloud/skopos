@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/plan"
 )
 
 // FuzzEmitNoUserValueLeak asserts that user-controlled values (label values,

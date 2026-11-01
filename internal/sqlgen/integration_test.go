@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/plan"
 )
 
 // TestIntegrationEmittedSQL executes emitter output against a real ClickHouse

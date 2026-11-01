@@ -24,7 +24,7 @@ if [ -z "$version" ]; then
 fi
 version=${version#v}
 chart_version=${CHART_VERSION:-$version}
-image_repository=${IMAGE_REPOSITORY:-ghcr.io/mrofisr/skopos-gateway}
+image_repository=${IMAGE_REPOSITORY:-ghcr.io/jawaracloud/skopos-gateway}
 image="$image_repository:$version"
 output_dir=${OUTPUT_DIR:-$root/dist/release}
 push=${PUSH:-0}

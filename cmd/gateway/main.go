@@ -12,13 +12,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mrofisr/skopos/internal/chclient"
-	"github.com/mrofisr/skopos/internal/config"
-	"github.com/mrofisr/skopos/internal/httpapi"
-	"github.com/mrofisr/skopos/internal/loki"
-	"github.com/mrofisr/skopos/internal/plan"
-	"github.com/mrofisr/skopos/internal/prom"
-	"github.com/mrofisr/skopos/internal/tempo"
+	"github.com/jawaracloud/skopos/internal/chclient"
+	"github.com/jawaracloud/skopos/internal/config"
+	"github.com/jawaracloud/skopos/internal/httpapi"
+	"github.com/jawaracloud/skopos/internal/loki"
+	"github.com/jawaracloud/skopos/internal/plan"
+	"github.com/jawaracloud/skopos/internal/prom"
+	"github.com/jawaracloud/skopos/internal/tempo"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".

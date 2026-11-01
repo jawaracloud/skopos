@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	traceqlcorpus "github.com/mrofisr/skopos/test/corpus/traceql"
+	traceqlcorpus "github.com/jawaracloud/skopos/test/corpus/traceql"
 )
 
 const (
