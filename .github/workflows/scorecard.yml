@@ -48,4 +48,4 @@ jobs:
           name: scorecard-${{ github.run_id }}-${{ github.run_attempt }}
           path: dist/scorecard/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 1
