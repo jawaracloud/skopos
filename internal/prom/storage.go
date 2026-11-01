@@ -41,7 +41,7 @@ func NewClickHouseFetcher(client *chclient.Client, schema *plan.Schema, names pl
 	if maxRows <= 0 {
 		return nil, fmt.Errorf("prom: max rows must be positive")
 	}
-	for _, name := range []string{names.MetricsGauge, names.MetricsSum, names.MetricsHistogram} {
+	for _, name := range []string{names.MetricsGauge, names.MetricsSum, names.MetricsHistogram, names.MetricsSummary, names.MetricsExponentialHistogram} {
 		if _, ok := schema.Table(name); !ok {
 			return nil, fmt.Errorf("prom: schema has no table %q", name)
 		}
@@ -55,7 +55,7 @@ func NewClickHouseFetcher(client *chclient.Client, schema *plan.Schema, names pl
 
 // Fetch implements Fetcher.
 func (f *ClickHouseFetcher) Fetch(ctx context.Context, sel Selector, start, end time.Time) ([]Series, error) {
-	gaugeFilter, sumFilter, histFilter := nameFilters(sel)
+	gaugeFilter, sumFilter, histFilter, summaryFilter := nameFilters(sel)
 	series := make(map[string]*Series)
 	if err := f.fetchTable(ctx, f.Names.MetricsGauge, tableGauge, gaugeFilter, start, end, series); err != nil {
 		return nil, err
@@ -64,6 +64,9 @@ func (f *ClickHouseFetcher) Fetch(ctx context.Context, sel Selector, start, end 
 		return nil, err
 	}
 	if err := f.fetchTable(ctx, f.Names.MetricsHistogram, tableHistogram, histFilter, start, end, series); err != nil {
+		return nil, err
+	}
+	if err := f.fetchTable(ctx, f.Names.MetricsSummary, tableSummary, summaryFilter, start, end, series); err != nil {
 		return nil, err
 	}
 	out := make([]Series, 0, len(series))
@@ -76,7 +79,17 @@ func (f *ClickHouseFetcher) Fetch(ctx context.Context, sel Selector, start, end 
 		out = append(out, *s)
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
+	if len(out) == 0 && hasMetricNameMatcher(sel) {
+		if err := f.probeExponentialHistogram(ctx, sel, start, end); err != nil {
+			return nil, err
+		}
+	}
 	return out, nil
+}
+
+func hasMetricNameMatcher(sel Selector) bool {
+	exact, regex := metricNameMatchers(sel)
+	return exact != "" || regex != ""
 }
 
 type tableKind int
@@ -85,6 +98,7 @@ const (
 	tableGauge tableKind = iota
 	tableSum
 	tableHistogram
+	tableSummary
 )
 
 func (f *ClickHouseFetcher) fetchTable(ctx context.Context, table string, kind tableKind, filter plan.Expr, start, end time.Time, out map[string]*Series) error {
@@ -103,6 +117,13 @@ func (f *ClickHouseFetcher) fetchTable(ctx context.Context, table string, kind t
 			plan.SelectItem{Expr: plan.Col("Sum")},
 			plan.SelectItem{Expr: plan.Col("BucketCounts")},
 			plan.SelectItem{Expr: plan.Col("ExplicitBounds")},
+		)
+	case tableSummary:
+		selects = append(selects,
+			plan.SelectItem{Expr: plan.Col("Count")},
+			plan.SelectItem{Expr: plan.Col("Sum")},
+			plan.SelectItem{Expr: plan.Col("ValueAtQuantiles.Quantile")},
+			plan.SelectItem{Expr: plan.Col("ValueAtQuantiles.Value")},
 		)
 	}
 	query := plan.Query{
@@ -135,6 +156,10 @@ func (f *ClickHouseFetcher) fetchTable(ctx context.Context, table string, kind t
 			f.addGaugeRow(result, i, out)
 		case tableHistogram:
 			if err := f.addHistogramRow(result, i, out); err != nil {
+				return err
+			}
+		case tableSummary:
+			if err := f.addSummaryRow(result, i, out); err != nil {
 				return err
 			}
 		}
@@ -205,8 +230,133 @@ func (f *ClickHouseFetcher) addHistogramRow(result *chclient.Result, row int, ou
 	return nil
 }
 
-func nameFilters(sel Selector) (gauge, sum, histogram plan.Expr) {
-	var exact, regex string
+func (f *ClickHouseFetcher) addSummaryRow(result *chclient.Result, row int, out map[string]*Series) error {
+	metric, _ := result.String(row, "MetricName")
+	service, _ := result.String(row, "ServiceName")
+	ts, err := resultTime(result, row)
+	if err != nil {
+		return nil
+	}
+	base := baseLabels(metric, service, attributes(result, row))
+	name := base["__name__"]
+
+	if count, ok := result.Float64(row, "Count"); ok {
+		labels := cloneLabels(base)
+		labels["__name__"] = name + "_count"
+		addSample(out, labels, Sample{T: ts, V: count})
+	}
+	if sum, ok := result.Float64(row, "Sum"); ok {
+		labels := cloneLabels(base)
+		labels["__name__"] = name + "_sum"
+		addSample(out, labels, Sample{T: ts, V: sum})
+	}
+	quantiles, err := floatSlice(result.Rows[row]["ValueAtQuantiles.Quantile"])
+	if err != nil {
+		return fmt.Errorf("prom: decode ValueAtQuantiles.Quantile: %w", err)
+	}
+	values, err := floatSlice(result.Rows[row]["ValueAtQuantiles.Value"])
+	if err != nil {
+		return fmt.Errorf("prom: decode ValueAtQuantiles.Value: %w", err)
+	}
+	for i, quantile := range quantiles {
+		if i >= len(values) {
+			break
+		}
+		labels := cloneLabels(base)
+		labels["quantile"] = formatBound(quantile)
+		addSample(out, labels, Sample{T: ts, V: values[i]})
+	}
+	return nil
+}
+
+// probeExponentialHistogram returns an explicit error if a selector that
+// produced no supported samples names an OTel exponential histogram. The probe
+// is bounded and only runs for selectors with a metric-name matcher.
+func (f *ClickHouseFetcher) probeExponentialHistogram(ctx context.Context, sel Selector, start, end time.Time) error {
+	filter := metricNameFilter(sel)
+	limit := 1000
+	if f.MaxRows > 0 && f.MaxRows < limit {
+		limit = f.MaxRows
+	}
+	query := plan.Query{
+		Signal: plan.SignalMetrics,
+		Table:  f.Names.MetricsExponentialHistogram,
+		Select: []plan.SelectItem{
+			{Expr: plan.Col("MetricName")},
+			{Expr: plan.Col("ServiceName")},
+			{Expr: plan.Col("Attributes")},
+		},
+		Where:      filter,
+		TimeColumn: "TimeUnix",
+		TimeRange: &plan.TimeRange{
+			Start:        start,
+			End:          end,
+			EndInclusive: true,
+		},
+		Limit: limit,
+	}
+	emitted, err := f.Emitter.Emit(query)
+	if err != nil {
+		return fmt.Errorf("prom: build exponential histogram probe: %w", err)
+	}
+	result, err := f.Client.Query(ctx, emitted.SQL, emitted.Params)
+	if err != nil {
+		return fmt.Errorf("prom: exponential histogram probe: %w", err)
+	}
+	for i := 0; i < result.Len(); i++ {
+		name, _ := result.String(i, "MetricName")
+		service, _ := result.String(i, "ServiceName")
+		labels := baseLabels(name, service, attributes(result, i))
+		family := labels["__name__"]
+		candidates := []string{family}
+		if !strings.HasSuffix(family, "_count") && !strings.HasSuffix(family, "_sum") {
+			candidates = append(candidates, family+"_count", family+"_sum")
+		}
+		for _, candidate := range candidates {
+			labels["__name__"] = candidate
+			if matchesAll(sel.Matchers, labels) {
+				return fmt.Errorf("%w: metric %q is an OpenTelemetry exponential histogram; exponential histograms and native histogram functions are not supported", ErrBadQuery, candidate)
+			}
+		}
+	}
+	return nil
+}
+func nameFilters(sel Selector) (gauge, sum, histogram, summary plan.Expr) {
+	exact, regex := metricNameMatchers(sel)
+	normalized := normalizedMetricName()
+	if exact != "" {
+		name := NormalizeLabelName(exact)
+		base := stripHistogramSuffix(name)
+		gauge = plan.Bin("=", normalized, plan.String("metric_filter", name))
+		sum = plan.Bin("=", normalized, plan.String("metric_filter", name))
+		histogram = plan.Bin("=", normalized, plan.String("metric_filter", base))
+		summary = plan.Bin("=", normalized, plan.String("metric_filter", base))
+		return gauge, sum, histogram, summary
+	}
+	if regex != "" {
+		gauge = plan.F("match", normalized, plan.String("metric_regex_filter", regex))
+		sum = plan.F("match", normalized, plan.String("metric_regex_filter", regex))
+		// Histogram bucket and summary quantile selectors usually include a
+		// suffix while the tables store the base name. Do not apply a name
+		// filter here; the Go matcher filters the expanded series.
+		return gauge, sum, nil, nil
+	}
+	return nil, nil, nil, nil
+}
+
+func metricNameFilter(sel Selector) plan.Expr {
+	exact, regex := metricNameMatchers(sel)
+	normalized := normalizedMetricName()
+	if exact != "" {
+		return plan.Bin("=", normalized, plan.String("metric_filter", stripHistogramSuffix(NormalizeLabelName(exact))))
+	}
+	if regex != "" {
+		return plan.F("match", normalized, plan.String("metric_regex_filter", regex))
+	}
+	return nil
+}
+
+func metricNameMatchers(sel Selector) (exact, regex string) {
 	for _, m := range sel.Matchers {
 		if m.Name != promlabels.MetricName {
 			continue
@@ -222,29 +372,15 @@ func nameFilters(sel Selector) (gauge, sum, histogram plan.Expr) {
 			}
 		}
 	}
-	normalized := func() plan.Expr {
-		return plan.F("replaceRegexpAll",
-			plan.Col("MetricName"),
-			plan.String("norm_pattern", `[^A-Za-z0-9_]`),
-			plan.String("norm_replacement", "_"),
-		)
-	}
-	if exact != "" {
-		name := NormalizeLabelName(exact)
-		gauge = plan.Bin("=", normalized(), plan.String("metric_filter", name))
-		sum = plan.Bin("=", normalized(), plan.String("metric_filter", name))
-		histogram = plan.Bin("=", normalized(), plan.String("metric_filter", stripHistogramSuffix(name)))
-		return gauge, sum, histogram
-	}
-	if regex != "" {
-		gauge = plan.F("match", normalized(), plan.String("metric_regex_filter", regex))
-		sum = plan.F("match", normalized(), plan.String("metric_regex_filter", regex))
-		// A histogram bucket selector's regex usually includes "_bucket", while
-		// the histogram table stores the base name. Do not apply a name filter
-		// here; the Go matcher filters the expanded bucket series.
-		return gauge, sum, nil
-	}
-	return nil, nil, nil
+	return exact, regex
+}
+
+func normalizedMetricName() plan.Expr {
+	return plan.F("replaceRegexpAll",
+		plan.Col("MetricName"),
+		plan.String("norm_pattern", `[^A-Za-z0-9_]`),
+		plan.String("norm_replacement", "_"),
+	)
 }
 
 func stripHistogramSuffix(name string) string {
@@ -389,6 +525,7 @@ func (f *ClickHouseFetcher) Metadata(ctx context.Context, metric string) (map[st
 		{f.Names.MetricsGauge, tableGauge, "gauge"},
 		{f.Names.MetricsSum, tableSum, "counter"},
 		{f.Names.MetricsHistogram, tableHistogram, "histogram"},
+		{f.Names.MetricsSummary, tableSummary, "summary"},
 	}
 	for _, table := range tables {
 		var filter plan.Expr

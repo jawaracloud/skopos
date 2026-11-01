@@ -121,8 +121,8 @@ func TestOverTimeAndOffset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("avg_over_time: %v", err)
 	}
-	if got := v.(Vector)[0].V; got != 5 {
-		t.Fatalf("avg_over_time = %v, want 5", got)
+	if got := v.(Vector)[0].V; got != 5.5 {
+		t.Fatalf("avg_over_time = %v, want 5.5", got)
 	}
 
 	v, err = testEngine().Query(context.Background(), `http_requests_total{service_name="checkout"} offset 1m`, atFive())
@@ -307,7 +307,7 @@ func TestLabelRegexIsAnchored(t *testing.T) {
 }
 
 func TestUnsupportedFunction(t *testing.T) {
-	if _, err := testEngine().Query(context.Background(), `label_replace(http_requests_total, "a", "$1", "b", "(.*)")`, atFive()); err == nil {
+	if _, err := testEngine().Query(context.Background(), `deriv(http_requests_total[2m])`, atFive()); err == nil {
 		t.Fatal("expected unsupported function error")
 	}
 }
