@@ -21,6 +21,9 @@ spec:
         app.kubernetes.io/component: clickhouse
       annotations:
         checksum/schema: {{ include (print $.Template.BasePath "/clickhouse-schema-configmap.yaml") . | sha256sum | quote }}
+        {{- if .Values.clickhouse.storage.enabled }}
+        checksum/storage: {{ include (print $.Template.BasePath "/clickhouse-storage-configmap.yaml") . | sha256sum | quote }}
+        {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.clickhouse.podSecurityContext | nindent 8 }}
@@ -55,6 +58,18 @@ spec:
             # unambiguous.
             - name: TZ
               value: UTC
+            {{- if .Values.clickhouse.storage.enabled }}
+            - name: CLICKHOUSE_S3_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.storageSecretName" . }}
+                  key: access-key-id
+            - name: CLICKHOUSE_S3_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.storageSecretName" . }}
+                  key: secret-access-key
+            {{- end }}
             {{- with .Values.clickhouse.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -92,6 +107,12 @@ spec:
               mountPath: /tmp
             - name: var-run
               mountPath: /var/run/clickhouse-server
+            {{- if .Values.clickhouse.storage.enabled }}
+            - name: storage-config
+              mountPath: /etc/clickhouse-server/config.d/10-storage.xml
+              subPath: 10-storage.xml
+              readOnly: true
+            {{- end }}
       volumes:
         - name: logs
           emptyDir: {}
@@ -99,6 +120,11 @@ spec:
           emptyDir: {}
         - name: var-run
           emptyDir: {}
+        {{- if .Values.clickhouse.storage.enabled }}
+        - name: storage-config
+          configMap:
+            name: {{ include "skopos.clickhouse.fullname" . }}-storage
+        {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data

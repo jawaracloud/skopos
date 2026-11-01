@@ -1,0 +1,37 @@
+<clickhouse>
+    <storage_configuration>
+        <disks>
+            <hot>
+                <type>local</type>
+                <path>/var/lib/clickhouse/disks/hot/</path>
+            </hot>
+            <cold_s3>
+                <type>s3</type>
+                <endpoint>http://rustfs:9000/skopos-cold/skopos/cold/</endpoint>
+                <access_key_id from_env="CLICKHOUSE_S3_ACCESS_KEY_ID"/>
+                <secret_access_key from_env="CLICKHOUSE_S3_SECRET_ACCESS_KEY"/>
+            </cold_s3>
+            <cold>
+                <type>cache</type>
+                <disk>cold_s3</disk>
+                <path>/var/lib/clickhouse/disks/cold_cache/</path>
+                <max_size>1Gi</max_size>
+            </cold>
+        </disks>
+        <policies>
+            <tiered>
+                <volumes>
+                    <hot>
+                        <disk>hot</disk>
+                    </hot>
+                    <default>
+                        <disk>default</disk>
+                    </default>
+                    <cold>
+                        <disk>cold</disk>
+                    </cold>
+                </volumes>
+            </tiered>
+        </policies>
+    </storage_configuration>
+</clickhouse>

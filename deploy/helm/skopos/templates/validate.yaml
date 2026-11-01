@@ -7,3 +7,51 @@
 {{- if and .Values.obi.enabled (not .Values.obi.serviceAccount.create) (not .Values.obi.serviceAccount.name) }}
 {{- fail "obi.enabled=true requires obi.serviceAccount.create=true or obi.serviceAccount.name" }}
 {{- end }}
+{{- if .Values.clickhouse.storage.enabled }}
+{{- $storage := .Values.clickhouse.storage }}
+{{- $cold := $storage.cold }}
+{{- if or (not $cold.endpoint) (not $cold.bucket) (not $cold.prefix) }}
+{{- fail "clickhouse.storage.enabled=true requires clickhouse.storage.cold.endpoint, .bucket, and .prefix" }}
+{{- end }}
+{{- if or (eq $storage.hotVolume $storage.coldVolume) (eq $storage.hotVolume "cold_s3") (eq $storage.coldVolume "cold_s3") (eq $storage.hotVolume "default") (eq $storage.coldVolume "default") }}
+{{- fail "clickhouse.storage.hotVolume and coldVolume must be different and must not be default or cold_s3" }}
+{{- end }}
+{{- if lt (int $storage.hotDays) 1 }}
+{{- fail "clickhouse.storage.hotDays must be at least 1" }}
+{{- end }}
+{{- if le (int $storage.totalDays) (int $storage.hotDays) }}
+{{- fail "clickhouse.storage.totalDays must be greater than clickhouse.storage.hotDays" }}
+{{- end }}
+{{- if and $cold.existingSecret (or $cold.accessKeyId $cold.secretAccessKey) }}
+{{- fail "set either clickhouse.storage.cold.existingSecret or inline accessKeyId/secretAccessKey, not both" }}
+{{- end }}
+{{- if and (not $cold.existingSecret) (or (not $cold.accessKeyId) (not $cold.secretAccessKey)) }}
+{{- fail "clickhouse.storage.enabled=true requires clickhouse.storage.cold.existingSecret or both inline credentials" }}
+{{- end }}
+{{- end }}
+{{- if .Values.clickhouse.backup.enabled }}
+{{- $backup := .Values.clickhouse.backup }}
+{{- if or (not $backup.endpoint) (not $backup.bucket) (not $backup.prefix) }}
+{{- fail "clickhouse.backup.enabled=true requires clickhouse.backup.endpoint, .bucket, and .prefix" }}
+{{- end }}
+{{- if and $backup.existingSecret (or $backup.accessKeyId $backup.secretAccessKey) }}
+{{- fail "set either clickhouse.backup.existingSecret or inline accessKeyId/secretAccessKey, not both" }}
+{{- end }}
+{{- if and (not $backup.existingSecret) (or (not $backup.accessKeyId) (not $backup.secretAccessKey)) }}
+{{- fail "clickhouse.backup.enabled=true requires clickhouse.backup.existingSecret or both inline credentials" }}
+{{- end }}
+{{- if .Values.clickhouse.storage.enabled }}
+{{- $cold := .Values.clickhouse.storage.cold }}
+{{- $coldEndpoint := trimSuffix "/" $cold.endpoint }}
+{{- $backupEndpoint := trimSuffix "/" $backup.endpoint }}
+{{- $coldBucket := trimSuffix "/" $cold.bucket }}
+{{- $backupBucket := trimSuffix "/" $backup.bucket }}
+{{- $coldPrefix := trimSuffix "/" $cold.prefix }}
+{{- $backupPrefix := trimSuffix "/" $backup.prefix }}
+{{- if and (eq $coldEndpoint $backupEndpoint) (eq $coldBucket $backupBucket) }}
+{{- if or (eq $coldPrefix $backupPrefix) (hasPrefix (printf "%s/" $coldPrefix) $backupPrefix) (hasPrefix (printf "%s/" $backupPrefix) $coldPrefix) }}
+{{- fail "clickhouse.backup destination overlaps the live cold tier; use a different bucket or non-overlapping prefix" }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
