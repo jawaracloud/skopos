@@ -74,16 +74,22 @@ action.
 
 - The workflow token only has `contents: write`; it does not need packages or
   id-token permissions.
-- The chart release asset is keyless-signed with cosign and published with a
-  `.sigstore` bundle. Verify it with:
+- The chart release asset is keyless-signed with cosign. The release includes
+  a detached `.sig` and the Fulcio `.pem` certificate. Verify it with:
 
   ```sh
   cosign verify-blob \
-    --bundle skopos-0.1.0-alpha.1.tgz.sigstore \
+    --signature skopos-0.1.0-alpha.1.tgz.sig \
+    --certificate skopos-0.1.0-alpha.1.tgz.pem \
     --certificate-identity-regexp 'https://github.com/jawaracloud/skopos/.github/workflows/chart-repo.yml@.*' \
     --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --insecure-ignore-tlog \
     skopos-0.1.0-alpha.1.tgz
   ```
+
+  The signature skips the Rekor transparency log so re-running the chart
+  workflow does not conflict with an existing equivalent log entry. The Fulcio
+  certificate still binds the signature to the workflow identity.
 
   The signature covers the release asset; the chart repository serves the same
   package bytes from `gh-pages`.
