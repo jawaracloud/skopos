@@ -11,7 +11,6 @@ env:
   GO_VERSION: "1.27.x"
   GOVULNCHECK_VERSION: v1.9.0
   HELM_VERSION: v3.22.1
-  CLICKHOUSE_IMAGE: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
 
 jobs:
   go:
@@ -40,16 +39,16 @@ jobs:
       - name: SQL emitter fuzz gate
         run: go test -run='^$' -fuzz=FuzzEmitNoUserValueLeak -fuzztime=30s ./internal/sqlgen
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+        run: "go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}"
       - name: govulncheck
-        run: "$(go env GOPATH)/bin/govulncheck" ./...
+        run: '$(go env GOPATH)/bin/govulncheck ./...'
 
   integration:
     name: ClickHouse integration
     runs-on: ubuntu-latest
     services:
       clickhouse:
-        image: ${{ env.CLICKHOUSE_IMAGE }}
+        image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
         ports:
           - 8123:8123
           - 9000:9000
