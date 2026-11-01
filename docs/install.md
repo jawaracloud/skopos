@@ -1,8 +1,8 @@
 # Installation and operations
 
-> Alpha: the chart installs the data plane and the gateway health endpoints.
-> The Prometheus, Loki, and Tempo query APIs are not implemented until M3–M5.
-> Do not expose this installation to the internet.
+> Alpha: the chart installs the data plane and the alpha Prometheus, Tempo,
+> and Loki query APIs. Unsupported functions return explicit errors; see the
+> per-language support lists. Do not expose this installation to the internet.
 
 ## Prerequisites
 
@@ -104,8 +104,11 @@ three datasources at the gateway service. Replace the namespace and service
 name if you changed them, then mount the file into Grafana's provisioning
 directory.
 
-The datasources will return connection or 404 errors until M3–M5 implement the
-query endpoints. The example is included so the wiring can be reviewed early.
+The datasources use the alpha query heads. Supported queries are listed in
+[promql-support.md](promql-support.md), [traceql-support.md](traceql-support.md),
+and [logql-support.md](logql-support.md). Unsupported functions return an
+explicit error, so a failing panel is usually a query outside the alpha list,
+not a connection problem.
 
 ## Ingress example
 

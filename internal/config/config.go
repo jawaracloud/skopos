@@ -24,6 +24,8 @@ type Config struct {
 	MaxMemoryUsage     uint64
 	MaxRowsToRead      uint64
 	MaxResultRows      uint64
+	MaxScanRows        uint64
+	MaxQueryRange      time.Duration
 	MaxResponseBytes   int64
 	ReadinessTimeout   time.Duration
 	MaxRequestBytes    int64
@@ -48,6 +50,8 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		MaxMemoryUsage:     1 << 30,
 		MaxRowsToRead:      10_000_000,
 		MaxResultRows:      100_000,
+		MaxScanRows:        200_000,
+		MaxQueryRange:      7 * 24 * time.Hour,
 		MaxResponseBytes:   64 << 20,
 		ReadinessTimeout:   2 * time.Second,
 		MaxRequestBytes:    1 << 20,
@@ -103,6 +107,12 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.MaxResultRows, err = uintEnv(lookup, "SKOPOS_CLICKHOUSE_MAX_RESULT_ROWS", cfg.MaxResultRows); err != nil {
 		return Config{}, err
 	}
+	if cfg.MaxScanRows, err = uintEnv(lookup, "SKOPOS_MAX_SCAN_ROWS", cfg.MaxScanRows); err != nil {
+		return Config{}, err
+	}
+	if cfg.MaxQueryRange, err = durationEnv(lookup, "SKOPOS_MAX_QUERY_RANGE", cfg.MaxQueryRange); err != nil {
+		return Config{}, err
+	}
 	if cfg.MaxResponseBytes, err = intEnv(lookup, "SKOPOS_CLICKHOUSE_MAX_RESPONSE_BYTES", cfg.MaxResponseBytes); err != nil {
 		return Config{}, err
 	}
@@ -142,8 +152,11 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("SKOPOS_READINESS_TIMEOUT: must be positive")
 	}
 	if cfg.MaxMemoryUsage == 0 || cfg.MaxRowsToRead == 0 || cfg.MaxResultRows == 0 ||
-		cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
+		cfg.MaxScanRows == 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
 		return Config{}, fmt.Errorf("SKOPOS limits must be positive")
+	}
+	if cfg.MaxQueryRange <= 0 {
+		return Config{}, fmt.Errorf("SKOPOS_MAX_QUERY_RANGE: must be positive")
 	}
 	return cfg, nil
 }

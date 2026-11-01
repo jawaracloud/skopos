@@ -41,11 +41,12 @@ New seams need agreement in the PR description before tests are written.
 - Stdlib-first. A non-stdlib dependency requires an entry in
   [docs/dependencies.md](docs/dependencies.md): reason, license, owner, and the
   pinned version.
-- The initial allow-list is the official Prometheus PromQL parser (D18). Test
-  dependencies are limited to the Prometheus compliance suite and the Loki
-  benchmark corpus.
-- `go.mod` and `go.sum` are committed. Vendoring is used once the first runtime
-  dependency lands.
+- The runtime allow-list is the official Prometheus PromQL parser (D18) and the
+  official OTLP protobuf types used for Tempo responses. Both are
+  provider-official and recorded in `docs/dependencies.md`. Test dependencies
+  are limited to reference implementations run black-box.
+- `go.mod`, `go.sum`, and `vendor/` are committed. Regenerate vendor with
+  `go mod vendor`; CI runs `go mod verify`.
 - Images in the chart are pinned by digest. Collector, OBI, and ClickHouse
   versions change only in separate, human-reviewed PRs.
 - No third-party Helm subcharts.

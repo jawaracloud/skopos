@@ -25,6 +25,10 @@ jobs:
           check-latest: true
       - name: Verify module checksums
         run: go mod verify
+      - name: Verify vendor tree is current
+        run: |
+          go mod vendor
+          git diff --exit-code -- vendor go.mod go.sum
       - name: Build
         run: go build ./...
       - name: Vet

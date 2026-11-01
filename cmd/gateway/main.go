@@ -15,6 +15,10 @@ import (
 	"github.com/mrofisr/skopos/internal/chclient"
 	"github.com/mrofisr/skopos/internal/config"
 	"github.com/mrofisr/skopos/internal/httpapi"
+	"github.com/mrofisr/skopos/internal/loki"
+	"github.com/mrofisr/skopos/internal/plan"
+	"github.com/mrofisr/skopos/internal/prom"
+	"github.com/mrofisr/skopos/internal/tempo"
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
@@ -52,12 +56,43 @@ func run() error {
 	}
 	defer client.Close()
 
+	schema := plan.DefaultSchema(cfg.ClickHouseDatabase, cfg.Tables)
+	fetcher, err := prom.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	if err != nil {
+		return fmt.Errorf("prometheus storage: %w", err)
+	}
+	promEngine := prom.NewEngine(fetcher)
+	promEngine.MaxSamples = int(cfg.MaxScanRows)
+	promAPI := prom.NewAPI(promEngine, fetcher, version)
+	promAPI.MaxRange = cfg.MaxQueryRange
+
+	tempoFetcher, err := tempo.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	if err != nil {
+		return fmt.Errorf("tempo storage: %w", err)
+	}
+	tempoAPI := tempo.NewAPI(tempoFetcher, version)
+	tempoAPI.MaxRange = cfg.MaxQueryRange
+
+	lokiFetcher, err := loki.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	if err != nil {
+		return fmt.Errorf("loki storage: %w", err)
+	}
+	lokiAPI := loki.NewAPI(lokiFetcher, version)
+	lokiAPI.MaxRange = cfg.MaxQueryRange
+
+	register := func(mux *http.ServeMux) {
+		promAPI.Register(mux)
+		tempoAPI.Register(mux)
+		lokiAPI.Register(mux)
+	}
+
 	api, err := httpapi.New(httpapi.Config{
 		Logger:           logger,
 		Pinger:           client,
 		Version:          version,
 		ReadinessTimeout: cfg.ReadinessTimeout,
 		MaxRequestBytes:  cfg.MaxRequestBytes,
+		Register:         register,
 	})
 	if err != nil {
 		return fmt.Errorf("http api: %w", err)
@@ -84,6 +119,9 @@ func run() error {
 		"database", cfg.ClickHouseDatabase,
 		"read_only_user", cfg.ClickHouseUser,
 		"tables", cfg.Tables,
+		"promql", true,
+		"traceql", true,
+		"logql", true,
 	)
 
 	errCh := make(chan error, 1)

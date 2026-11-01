@@ -1,8 +1,9 @@
 # Example Grafana datasource provisioning for Skopos.
 #
 # Replace the namespace/service if you installed the chart with a different
-# release name or namespace. The query endpoints are planned for M3–M5; until
-# then these datasources will return errors.
+# release name or namespace. The three alpha query heads are implemented; see
+# docs/promql-support.md, docs/traceql-support.md, and docs/logql-support.md for
+# the supported subset. Unsupported queries return explicit errors.
 apiVersion: 1
 
 datasources:

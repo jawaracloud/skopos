@@ -20,13 +20,15 @@ CNCF tradition of naming observability projects after watchers and signals
 | --- | --- | --- |
 | Helm data plane (OBI, Collector, ClickHouse) | Alpha | M1 complete; `helm lint`/`helm template` and a k3d smoke test with a generator writing traces, metrics, and logs. OBI itself was not exercised in k3d (kernel/privilege constraints); its config was validated against the v1.0.0 binary. |
 | Query core (plan IR, SQL emitter, ClickHouse HTTP client) | Alpha | M2: golden SQL, fuzz, unit, and real-ClickHouse integration tests. |
-| Prometheus-compatible API | Not implemented | Planned for M3. |
-| Tempo-compatible API | Not implemented | Planned for M4. |
-| Loki-compatible API | Not implemented | Planned for M5. |
-| Grafana datasource examples | Included | They will return errors until the M3–M5 APIs land. |
+| Prometheus-compatible API | Alpha | M3: `query`, `query_range`, `series`, `labels`, label values, metadata. See [docs/promql-support.md](docs/promql-support.md). |
+| Tempo-compatible API | Alpha | M4: search, trace by ID (JSON/protobuf), tags, tag values. See [docs/traceql-support.md](docs/traceql-support.md). |
+| Loki-compatible API | Alpha | M5: log query/query_range, labels, label values, series. See [docs/logql-support.md](docs/logql-support.md). |
+| Grafana datasource examples | Alpha-ready | All three datasource types point at the gateway. |
 
-The gateway currently serves `/healthz`, `/readyz`, and `/version`. It does not
-yet serve query endpoints. Do not point production Grafana instances at it.
+The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
+TraceQL, and LogQL endpoints. Unsupported functions return an explicit error.
+The language support lists are narrow; do not point production Grafana
+instances at an alpha deployment.
 
 ## Architecture
 
@@ -45,7 +47,7 @@ Kubernetes cluster
 |                                       ^                          |
 |                                       | HTTP, read-only user     |
 |                         Skopos gateway (Go, ClusterIP)           |
-|                         Prometheus / Loki / Tempo APIs (M3–M5)   |
+|                         Prometheus / Loki / Tempo APIs (alpha)    |
 |                                       ^                          |
 |                                       |                          |
 |                         Grafana (user-managed)                   |
@@ -97,12 +99,17 @@ kubectl -n observability get pods
 kubectl -n observability get pvc
 ```
 
-After enabling the gateway, check its health:
+After enabling the gateway, check its health and query the three heads:
 
 ```sh
 kubectl -n observability port-forward svc/skopos-gateway 8080:8080
 curl -s http://127.0.0.1:8080/healthz
 curl -s http://127.0.0.1:8080/readyz
+
+curl -s -G http://127.0.0.1:8080/api/v1/query \
+  --data-urlencode 'query=up'
+curl -s 'http://127.0.0.1:8080/api/search?q=%7B%7D'
+curl -s 'http://127.0.0.1:8080/loki/api/v1/labels'
 ```
 
 The full installation, TTL, disk-full, and Grafana provisioning notes are in
@@ -110,7 +117,9 @@ The full installation, TTL, disk-full, and Grafana provisioning notes are in
 
 ## Development
 
-Skopos is stdlib-first. M0–M2 have no non-standard-library Go dependencies.
+Skopos is stdlib-first. M0–M2 had no non-standard-library Go dependencies.
+M3 adds the official Prometheus PromQL parser and the official OTLP protobuf
+types for Tempo responses; both are recorded in [docs/dependencies.md](docs/dependencies.md).
 
 ```sh
 make test                 # unit tests
@@ -118,12 +127,14 @@ make test-integration     # requires a ClickHouse HTTP endpoint
 make fuzz                 # short anti-leak fuzz run
 make helm-lint            # helm lint
 make helm-template        # render the chart
-make check                # vet + test + helm lint
+make check                # vet + test + fuzz + helm lint
 ```
 
 The query-core tests live in `internal/sqlgen` (golden SQL and fuzzing),
 `internal/chclient` (HTTP client and ClickHouse integration), and
-`internal/httpapi` (health endpoints). The Helm chart is in `deploy/helm/skopos`.
+`internal/httpapi` (health endpoints). The language heads have unit and
+integration tests in `internal/prom`, `internal/tempo`, and `internal/loki`.
+The Helm chart is in `deploy/helm/skopos`.
 
 ## Security
 
@@ -137,6 +148,9 @@ the internet. See [SECURITY.md](SECURITY.md) and [docs/install.md](docs/install.
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
 - [Installation and operations](docs/install.md)
 - [Support matrix](docs/support-matrix.md)
+- [PromQL support](docs/promql-support.md)
+- [TraceQL support](docs/traceql-support.md)
+- [LogQL support](docs/logql-support.md)
 - [Dependency and supply-chain policy](docs/dependencies.md)
 - [Contributing](CONTRIBUTING.md)
 

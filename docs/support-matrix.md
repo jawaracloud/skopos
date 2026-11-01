@@ -8,9 +8,9 @@ empty or incorrect result.
 
 | Signal | Ingest | Storage | Query API | Status |
 | --- | --- | --- | --- | --- |
-| Metrics | OBI -> Collector OTLP -> ClickHouse | `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary` | Not implemented (M3 PromQL) | Alpha |
-| Traces | OBI -> Collector OTLP -> ClickHouse | `otel_traces`, `otel_traces_trace_id_ts` | Not implemented (M4 TraceQL) | Alpha |
-| Logs | Collector OTLP receiver (enabled); filelog receiver not bundled | `otel_logs` | Not implemented (M5 LogQL) | Alpha |
+| Metrics | OBI or OTLP clients -> Collector -> ClickHouse | `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary` | Prometheus-compatible (M3) | Alpha |
+| Traces | OBI or OTLP clients -> Collector -> ClickHouse | `otel_traces`, `otel_traces_trace_id_ts` | Tempo-compatible (M4) | Alpha |
+| Logs | OTLP clients -> Collector -> ClickHouse; filelog receiver not bundled | `otel_logs` | Loki-compatible (M5) | Alpha |
 
 OBI does not emit logs. The default chart accepts logs through the Collector's
 OTLP receiver. A manual k3d smoke test sent traces, metrics, and logs through
@@ -18,27 +18,28 @@ the Collector and read them back from ClickHouse; this is not yet an automated
 chart test. A filelog receiver is not bundled; enabling one requires verifying
 the receiver component and its maturity first.
 
-## Gateway endpoints
+## Query endpoints
 
-| Endpoint | Status |
-| --- | --- |
-| `GET /healthz` | Implemented |
-| `GET /readyz` | Implemented |
-| `GET /version` | Implemented |
-| Prometheus `/api/v1/*` | Not implemented (M3) |
-| Tempo `/api/*` | Not implemented (M4) |
-| Loki `/loki/api/v1/*` | Not implemented (M5) |
+| Endpoint group | Status | Support list |
+| --- | --- | --- |
+| Prometheus `/api/v1/*` | Implemented alpha | [promql-support.md](promql-support.md) |
+| Tempo `/api/*` and `/api/v2/*` | Implemented alpha | [traceql-support.md](traceql-support.md) |
+| Loki `/loki/api/v1/*` | Implemented alpha | [logql-support.md](logql-support.md) |
+| Health `/healthz`, `/readyz`, `/version` | Implemented | — |
 
-## PromQL, TraceQL, LogQL
+The gateway exposes all three APIs on one port. The Grafana datasource example
+points all three datasource types at that service.
 
-The per-language supported-function lists will be published in
-`docs/promql-support.md`, `docs/traceql-support.md`, and
-`docs/logql-support.md` when M3–M5 land. Until then, the only honest answer is
-that the language heads are not implemented.
+## Language support
 
-The gateway parses the configurable database and table names at startup. The
-M3–M5 heads will build the plan schema from them; the current health-only server
-does not query ClickHouse except for `/readyz`.
+- **PromQL:** selectors, matchers, `rate`/`irate`/`increase`, range
+  aggregations, `histogram_quantile`, basic math, scalar/vector and one-to-one
+  vector/vector binary operators, `offset`, and the listed aggregations.
+- **TraceQL:** one spanset, `&&`/`||`, tag matchers, status/kind/duration
+  intrinsics, tag search, tags and tag values, trace by ID in OTLP JSON or
+  protobuf.
+- **LogQL:** stream selectors and line filters. Parser stages and metric
+  queries are rejected.
 
 ## ClickHouse version
 
@@ -54,3 +55,7 @@ with the beta test matrix.
 - The gateway has no auth. See [SECURITY.md](../SECURITY.md).
 - OBI's kernel and capability requirements are external constraints, not
   something the chart can validate.
+- Query evaluation is in the gateway, not pushed down to ClickHouse. The row
+  scan limit and 7-day range bound protect the single-node alpha deployment.
+- The language support lists are intentionally narrow and do not yet satisfy
+  the beta gates (full compliance tester, Loki corpus, three-way diff).

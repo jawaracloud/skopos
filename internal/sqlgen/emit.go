@@ -538,6 +538,7 @@ var scalarFunctions = map[string]struct{}{
 	"toDateTime": {}, "toDate": {}, "toUnixTimestamp64Nano": {},
 	"toStartOfInterval": {}, "toStartOfMinute": {}, "toStartOfFiveMinutes": {},
 	"toStartOfHour": {}, "toStartOfDay": {}, "formatDateTime": {},
+	"replaceRegexpAll": {}, "replaceAll": {}, "concat": {},
 	"lower": {}, "upper": {}, "match": {}, "hasToken": {}, "has": {},
 	"mapContains": {}, "mapKeys": {}, "mapValues": {}, "arrayJoin": {},
 	"arraySum": {}, "arrayCount": {}, "arrayConcat": {}, "length": {},

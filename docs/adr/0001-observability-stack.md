@@ -114,11 +114,11 @@ the gateway.
 | --- | --- | --- |
 | ClickHouse exporter exists in the pinned contrib distribution | Verified: exporter is in contrib v0.164.0; image pinned by digest. | Re-check on every version bump. |
 | Collector remote-write receiver for mirroring | Not verified | Check component and maturity before enabling. |
-| Tempo wire format requested by Grafana (JSON vs protobuf) | Not verified | Replay Grafana requests against a test gateway. If protobuf is required, add an official dependency to the allow-list or write the encoder. |
+| Tempo wire format requested by Grafana (JSON vs protobuf) | Verified: Tempo returns OTLP JSON by default and protobuf with `Accept: application/protobuf`; both are implemented using the official OTLP messages. | Replay against a real Grafana during the alpha release checklist. |
 | OBI in CI | OBI needs kernel 5.8+, BTF, and privileges; standard CI runners may not qualify. | Use an OTLP generator in CI and test OBI on a dedicated VM. |
-| Official PromQL parser dependency tree | Not measured | Evaluate with `go mod graph` before M3. |
+| Official PromQL parser dependency tree | Measured: 15 modules in the build, all Apache-2.0/BSD-3/MIT; vendored. | Re-check on every version bump. |
 | Real ClickHouse compression and cost | Not measured | M6. |
-| Minimum supported ClickHouse version | Tested 26.8 in this repository; older versions are not supported in alpha. | Expand the test matrix before beta. |
+| Minimum supported ClickHouse version | Tested 26.8.36.3; logs use text indexes from 26.2. | Expand the test matrix before beta. |
 | Product differentiation versus cerberus, oteldb, ClickStack, and SigNoz | Not written | Add one sentence to README before release. |
 
 ## Out of scope for v0.1
@@ -133,3 +133,23 @@ the gateway.
 - Alerting and ruler. User alerts stay in Grafana or Prometheus.
 - A migration CLI and per-user query parity verification.
 - Indonesian data-residency claims.
+
+## Implementation status (2026-11-01)
+
+M0-M5 alpha slices are implemented in the repository:
+
+- M0 foundation, M1 data plane, and M2 query core.
+- M3 PromQL head: selectors, matchers, counter functions, range aggregations,
+  `histogram_quantile`, basic math, scalar/vector and one-to-one vector/vector
+  operators, `offset`, and aggregations. Support list in
+  `docs/promql-support.md`.
+- M4 TraceQL head: single-spanset tag filters, tag search, tags/tag values, and
+  trace by ID in OTLP JSON and protobuf. Support list in
+  `docs/traceql-support.md`.
+- M5 LogQL head: stream selectors and line filters, labels, label values, and
+  series. Support list in `docs/logql-support.md`.
+
+The beta gates remain open: the full PromQL compliance tester, the Loki
+benchmark corpus, the in-house TraceQL corpus, and the three-way differential
+diff. OBI has not yet been exercised on a qualifying VM. M6 hardening and M7
+release packaging are still pending.

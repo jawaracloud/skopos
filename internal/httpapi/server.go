@@ -28,6 +28,9 @@ type Config struct {
 	Version          string
 	ReadinessTimeout time.Duration
 	MaxRequestBytes  int64
+	// Register adds the query-head routes to the server mux. It is called
+	// before the JSON 404 catch-all.
+	Register func(*http.ServeMux)
 }
 
 // Server owns the gateway handlers.
@@ -37,6 +40,7 @@ type Server struct {
 	version          string
 	readinessTimeout time.Duration
 	maxRequestBytes  int64
+	register         func(*http.ServeMux)
 }
 
 // New validates cfg and returns a server.
@@ -68,6 +72,7 @@ func New(cfg Config) (*Server, error) {
 		version:          cfg.Version,
 		readinessTimeout: cfg.ReadinessTimeout,
 		maxRequestBytes:  cfg.MaxRequestBytes,
+		register:         cfg.Register,
 	}, nil
 }
 
@@ -77,6 +82,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /healthz", s.healthz)
 	mux.HandleFunc("GET /readyz", s.readyz)
 	mux.HandleFunc("GET /version", s.versionHandler)
+	if s.register != nil {
+		s.register(mux)
+	}
 	mux.HandleFunc("/", s.notFound)
 
 	known := map[string]struct{}{
