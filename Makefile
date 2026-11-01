@@ -7,7 +7,7 @@ VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus bench release release-dry-run release-check
+.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus bench release release-dry-run release-check scorecard
 
 help:
 	@printf '%s\n' \
@@ -26,6 +26,7 @@ help:
 		'release           build and package release artifacts (VERSION=...)' \
 		'release-dry-run   release build without pushing or signing' \
 		'release-check     release preflight: vet, tests, Helm, script syntax' \
+		'scorecard         run pinned OpenSSF Scorecard (needs GITHUB_AUTH_TOKEN)' \
 		'check             vet + test + fuzz + helm lint'
 
 build:
@@ -74,11 +75,15 @@ release:
 release-dry-run:
 	VERSION=$(VERSION) PUSH=0 SIGN=0 ./scripts/release.sh
 
+scorecard:
+	./scripts/scorecard.sh
+
 release-check: vet test helm-lint
 	$(HELM) template skopos $(CHART) --namespace observability >/dev/null
 	cd test/compat/prometheus && $(GO) mod verify && $(GO) vet ./... && $(GO) test -count=1 ./...
 	sh -n scripts/release.sh
 	sh -n scripts/sbom-fallback.sh
+	sh -n scripts/scorecard.sh
 	sh -n test/e2e/obi/run.sh
 	sh -n test/e2e/obi/verify.sh
 	sh -n test/e2e/obi/load.sh

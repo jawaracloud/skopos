@@ -1,0 +1,67 @@
+name: Feature request
+description: Propose a change to Skopos
+title: "feature: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Skopos is alpha and intentionally narrow. Explain the problem first, then
+        the smallest change that would solve it. Compatibility claims must match
+        the published support lists in `docs/`.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What can you not do today, and who is affected?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the behavior, API, chart value, or documentation change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Existing workarounds, other projects, or doing nothing.
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Metrics / PromQL
+        - Traces / TraceQL
+        - Logs / LogQL
+        - Helm chart or data plane
+        - Gateway or API surface
+        - Documentation or release tooling
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Compatibility and test impact
+      description: Does this change a public endpoint, chart value, stored schema, or support list? What oracle or test would prove it?
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I checked the support matrix and existing issues before filing this.
+          required: true
+        - label: I am not asking for a security disclosure in this public issue.
+          required: true

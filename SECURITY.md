@@ -3,14 +3,25 @@
 ## Reporting a vulnerability
 
 Do not open a public issue for a security problem. Open a private security
-advisory in the repository hosting this project, or contact the maintainers
-through the same private channel. Include the affected version, a reproduction,
-and the impact.
+advisory at
+<https://github.com/jawaracloud/skopos/security/advisories/new>. While the
+repository is private, only users with repository access can use that form. If
+the advisory form is unavailable, open a minimal public issue that asks the
+maintainers for a private channel, without disclosing the vulnerability
+details. Include the affected version or commit, a reproduction, and the impact.
+
+## Response targets
+
+The maintainers aim to acknowledge a vulnerability report within 7 days and
+provide an initial assessment within 14 days. These are targets, not a
+guarantee. Disclosure is coordinated with the reporter; the default target is
+90 days after the initial report, or sooner when a fix and advisory are ready.
 
 ## Supported versions
 
-Only the latest v0.1 alpha release line is supported. Alpha releases have no
-compatibility guarantee and may receive security fixes only on the latest tag.
+No release has been published yet. When the v0.1 alpha line is published, only
+the latest alpha release will be supported. Alpha releases have no compatibility
+guarantee and may receive security fixes only on the latest tag.
 
 ## Security model for v0.1
 
@@ -34,8 +45,16 @@ compatibility guarantee and may receive security fixes only on the latest tag.
   `CAP_NET_ADMIN` or `CAP_SYS_ADMIN`. See `values.yaml` and OBI's security
   documentation before enabling those features.
 - **Supply chain.** Go modules use `go.sum`; images are pinned by digest; the
-  chart has no third-party subcharts. SBOM generation and signing are part of
-  the release milestone and are not yet implemented.
+  chart has no third-party subcharts. SBOM generation and signing are scaffolded
+  in the release scripts, but no release has been published or signed with
+  project keys yet.
+
+## Review status
+
+The SQL emitter and escaping, Helm `securityContext` and capabilities, and
+NetworkPolicies have automated tests, fuzzing, and a human review gate in
+CONTRIBUTING.md. They have not yet had an independent human security review.
+The alpha is not a substitute for that review; treat it accordingly.
 
 ## Known limitations
 

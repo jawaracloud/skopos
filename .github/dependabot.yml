@@ -1,0 +1,77 @@
+version: 2
+
+# Dependency bumps are separate, human-reviewed PRs per CONTRIBUTING.md. Keep
+# the open-PR limit low so updates do not crowd out feature work. Grouped
+# minor/patch updates reduce noise; major updates stay individual for review.
+updates:
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      go-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gomod
+    directory: "/test/compat/prometheus"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:10"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      prometheus-oracle-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: gomod
+    directory: "/test/e2e/obi/app"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:20"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      obi-e2e-app-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      actions-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
