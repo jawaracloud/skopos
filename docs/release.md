@@ -58,7 +58,8 @@ artifacts, so maintainers can inspect a release before publishing.
 
 Chart publishing is independent of the image release tag. On every push to
 `main`, `.github/workflows/chart-repo.yml` packages the chart, creates the chart
-release, and updates the `gh-pages` index. Chart-releaser skips an unchanged
+release, keyless-signs the package with cosign, and updates the `gh-pages`
+index. Chart-releaser skips an unchanged
 `Chart.yaml` version, so bump `version` in `deploy/helm/skopos/Chart.yaml` to
 publish a new chart.
 
