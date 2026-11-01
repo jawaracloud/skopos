@@ -1,0 +1,102 @@
+name: skopos-s3-it
+
+services:
+  rustfs-perms:
+    image: alpine:3.22
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - chown -R 10001:10001 /data
+    volumes:
+      - rustfs-data:/data
+
+  rustfs:
+    image: rustfs/rustfs:1.0.4@sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2
+    depends_on:
+      rustfs-perms:
+        condition: service_completed_successfully
+    environment:
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_OBS_LOGGER_LEVEL: warn
+    ports:
+      - "19000:9000"
+      - "19001:9001"
+    volumes:
+      - rustfs-data:/data
+    healthcheck:
+      test:
+        - CMD
+        - /bin/sh
+        - -ec
+        - curl -fsS http://127.0.0.1:9000/health
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 5s
+
+  buckets:
+    image: amazon/aws-cli:2.31.7
+    depends_on:
+      rustfs:
+        condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: rustfsadmin
+      AWS_SECRET_ACCESS_KEY: rustfsadmin
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint:
+      - /bin/sh
+      - -ec
+    command:
+      - |
+        until aws --endpoint-url http://rustfs:9000 s3api list-buckets >/dev/null 2>&1; do
+          sleep 1
+        done
+        aws --endpoint-url http://rustfs:9000 s3 mb s3://skopos-cold || true
+        aws --endpoint-url http://rustfs:9000 s3 mb s3://skopos-backup || true
+
+  clickhouse-perms:
+    image: alpine:3.22
+    user: "0:0"
+    command:
+      - /bin/sh
+      - -ec
+      - chown -R 101:101 /var/lib/clickhouse
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.36.3
+    user: "101:101"
+    depends_on:
+      buckets:
+        condition: service_completed_successfully
+      clickhouse-perms:
+        condition: service_completed_successfully
+    environment:
+      CLICKHOUSE_PASSWORD: test-password
+      CLICKHOUSE_S3_ACCESS_KEY_ID: rustfsadmin
+      CLICKHOUSE_S3_SECRET_ACCESS_KEY: rustfsadmin
+    ports:
+      - "18123:8123"
+      - "18124:9000"
+    volumes:
+      - ${SKOPOS_S3_STORAGE_XML:-./clickhouse/storage.xml}:/etc/clickhouse-server/config.d/90-storage.xml:ro
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - clickhouse-client --password "$$CLICKHOUSE_PASSWORD" --query 'SELECT 1'
+      interval: 3s
+      timeout: 5s
+      retries: 60
+      start_period: 10s
+
+volumes:
+  rustfs-data:
+  clickhouse-data:

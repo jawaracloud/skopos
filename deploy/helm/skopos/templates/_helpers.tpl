@@ -80,6 +80,26 @@ app.kubernetes.io/component: {{ $component }}
 {{- include "skopos.clickhouse.fullname" . }}
 {{- end }}
 
+{{- define "skopos.clickhouse.storageSecretName" -}}
+{{- if .Values.clickhouse.storage.cold.existingSecret }}
+{{- .Values.clickhouse.storage.cold.existingSecret }}
+{{- else }}
+{{- printf "%s-clickhouse-s3" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{- define "skopos.clickhouse.backupSecretName" -}}
+{{- if .Values.clickhouse.backup.existingSecret }}
+{{- .Values.clickhouse.backup.existingSecret }}
+{{- else }}
+{{- printf "%s-clickhouse-backup-s3" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{- define "skopos.clickhouseBackup.fullname" -}}
+{{- printf "%s-clickhouse-backup" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{- define "skopos.collector.host" -}}
 {{- include "skopos.collector.fullname" . }}
 {{- end }}

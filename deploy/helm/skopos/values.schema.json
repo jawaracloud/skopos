@@ -18,6 +18,8 @@
         "database",
         "tables",
         "ttl",
+        "storage",
+        "backup",
         "persistence",
         "service",
         "auth",
@@ -131,6 +133,182 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 3650
+            }
+          }
+        },
+        "storage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "hotVolume",
+            "coldVolume",
+            "hotDays",
+            "totalDays",
+            "cacheSize",
+            "cold"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "hotVolume": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "coldVolume": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "hotDays": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3650
+            },
+            "totalDays": {
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 3650
+            },
+            "cacheSize": {
+              "type": "string",
+              "minLength": 1
+            },
+            "cold": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "endpoint",
+                "bucket",
+                "prefix",
+                "region",
+                "existingSecret",
+                "accessKeyId",
+                "secretAccessKey"
+              ],
+              "properties": {
+                "endpoint": {
+                  "type": "string"
+                },
+                "bucket": {
+                  "type": "string"
+                },
+                "prefix": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "region": {
+                  "type": "string"
+                },
+                "existingSecret": {
+                  "type": "string"
+                },
+                "accessKeyId": {
+                  "type": "string"
+                },
+                "secretAccessKey": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled",
+            "schedule",
+            "activeDeadlineSeconds",
+            "startingDeadlineSeconds",
+            "successfulJobsHistoryLimit",
+            "failedJobsHistoryLimit",
+            "image",
+            "endpoint",
+            "bucket",
+            "prefix",
+            "region",
+            "existingSecret",
+            "accessKeyId",
+            "secretAccessKey"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "schedule": {
+              "type": "string",
+              "minLength": 1
+            },
+            "activeDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "startingDeadlineSeconds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "successfulJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "failedJobsHistoryLimit": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "image": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "repository",
+                "tag",
+                "digest",
+                "pullPolicy"
+              ],
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "tag": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "digest": {
+                  "type": "string",
+                  "pattern": "^(|sha256:[a-f0-9]{64})$"
+                },
+                "pullPolicy": {
+                  "type": "string",
+                  "enum": [
+                    "Always",
+                    "IfNotPresent",
+                    "Never"
+                  ]
+                }
+              }
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "bucket": {
+              "type": "string"
+            },
+            "prefix": {
+              "type": "string",
+              "minLength": 1
+            },
+            "region": {
+              "type": "string"
+            },
+            "existingSecret": {
+              "type": "string"
+            },
+            "accessKeyId": {
+              "type": "string"
+            },
+            "secretAccessKey": {
+              "type": "string"
             }
           }
         },

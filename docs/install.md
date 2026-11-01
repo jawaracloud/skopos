@@ -19,6 +19,8 @@
   not grant `NET_ADMIN` or `SYS_ADMIN`. See `values.yaml` and OBI's security
   documentation before enabling trace-context propagation or network
   observability.
+- Optional tiered storage and backups need S3-compatible endpoints, existing
+  buckets, and credentials. See [storage.md](storage.md).
 
 ## Install the data plane
 
@@ -84,7 +86,14 @@ The important values are:
 | `clickhouse.persistence.size` | `50Gi` | PVC request. |
 | `clickhouse.persistence.storageClass` | `""` | Empty uses the cluster default. |
 | `clickhouse.limits.*` | see `values.yaml` | Gateway user limits in ClickHouse, also used by the gateway client. |
-| `clickhouse.ttl.*` | see `values.yaml` | Table TTLs. The chart keeps ClickHouse and the init client in UTC. |
+| `clickhouse.ttl.*` | see `values.yaml` | Table TTLs. The chart keeps ClickHouse and the init client in UTC. Ignored for signal tables when tiered storage is enabled. |
+| `clickhouse.storage.enabled` | `false` | Optional tiered storage: hot local PVC plus S3-compatible cold volume. Requires a bucket and credentials. See [storage.md](storage.md). |
+| `clickhouse.storage.hotDays`, `totalDays` | `3`, `30` | Move parts to cold after `hotDays`; delete after `totalDays`. These replace `clickhouse.ttl.*` when storage is enabled. |
+| `clickhouse.storage.cold.*` | empty | S3 endpoint, bucket, prefix, and credentials (or `existingSecret`) for the live cold tier. |
+| `clickhouse.storage.cacheSize` | `10Gi` | Local read cache for cold parts, on the ClickHouse PVC. |
+| `clickhouse.backup.enabled` | `false` | Optional CronJob that runs `BACKUP DATABASE` to a separate S3 destination. See [storage.md](storage.md). |
+| `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
+| `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
 | `gateway.image.digest` | `""` | Release images must set this. |
 | `networkPolicy.enabled` | `true` | Component ingress NetworkPolicies. |
 | `networkPolicy.gateway.allowFrom` | `[{namespaceSelector: {}}]` | Namespace/label selectors allowed to reach the gateway. Empty means no ingress. Tighten this to your Grafana namespace. |
@@ -134,6 +143,11 @@ authenticating proxy, TLS, and rate limiting before applying it, and tighten
   the ClickHouse data directory while the pod is running.
 - The chart does not set a Prometheus alert for disk usage. Use your cluster's
   PVC alerts.
+- Tiered storage is optional and off by default. When enabled, cold parts live
+  in S3 and remain queryable, while TTL still deletes them at `totalDays`.
+  Backups are separate: they are for disaster recovery and must be restored
+  before the gateway can query them. See [storage.md](storage.md) for values,
+  existing-install `ALTER` steps, and restore commands.
 
 ## Security notes
 

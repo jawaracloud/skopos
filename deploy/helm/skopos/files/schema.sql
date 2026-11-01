@@ -45,8 +45,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(Timestamp)
 ORDER BY (ServiceName, SpanName, toDateTime(Timestamp))
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.ttl.tracesDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.traces }}_trace_id_ts` (
     TraceId String CODEC(ZSTD(1)),
@@ -56,8 +61,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(Start)
 ORDER BY (TraceId, Start)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(Start) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(Start) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(Start) + toIntervalDay({{ .Values.clickhouse.ttl.tracesDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.traces }}_trace_id_ts_mv`
 TO `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.traces }}_trace_id_ts`
@@ -101,13 +111,21 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_scope_attr_value mapValues(ScopeAttributes) TYPE text(tokenizer = 'array'),
     INDEX idx_log_attr_key mapKeys(LogAttributes) TYPE text(tokenizer = 'array'),
     INDEX idx_log_attr_value mapValues(LogAttributes) TYPE text(tokenizer = 'array'),
+    -- idx_body is case-sensitive and serves match(Body, ...) plus token search.
+    -- idx_lower_body below is retained for case-insensitive lower(Body) predicates.
+    INDEX idx_body Body TYPE text(tokenizer = 'splitByNonAlpha'),
     INDEX idx_lower_body lower(Body) TYPE text(tokenizer = 'splitByNonAlpha'),
     INDEX idx_event_name EventName TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = MergeTree()
 PARTITION BY toDate(Timestamp)
 ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.ttl.logsDays }})
-SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.metricsGauge }}` (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -143,8 +161,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.ttl.metricsDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.metricsSum }}` (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -182,8 +205,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.ttl.metricsDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.metricsHistogram }}` (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -225,8 +253,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.ttl.metricsDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.metricsExponentialHistogram }}` (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -272,8 +305,13 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.ttl.metricsDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};
 
 CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.clickhouse.tables.metricsSummary }}` (
     ResourceAttributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
@@ -307,5 +345,10 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
 ) ENGINE = MergeTree()
 PARTITION BY toDate(TimeUnix)
 ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+{{- if .Values.clickhouse.storage.enabled }}
+TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
+    toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
+{{- else }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.ttl.metricsDays }})
-SETTINGS index_granularity=8192, ttl_only_drop_parts = 1;
+{{- end }}
+SETTINGS index_granularity=8192, ttl_only_drop_parts = 1{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }};

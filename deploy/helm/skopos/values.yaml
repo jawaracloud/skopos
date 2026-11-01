@@ -21,6 +21,58 @@ clickhouse:
     tracesDays: 7
     logsDays: 7
     metricsDays: 30
+  # Optional tiered storage. Disabled means the schema keeps today's
+  # local-only TTL/delete behavior and no S3 configuration is mounted.
+  # When enabled, all signal tables use the `tiered` storage policy and this
+  # hotDays/totalDays pair replaces the per-signal clickhouse.ttl values.
+  storage:
+    enabled: false
+    # Local hot disk/volume and S3-backed cold volume names. Keep them
+    # distinct; `default` and `cold_s3` are reserved by the generated config.
+    hotVolume: hot
+    coldVolume: cold
+    hotDays: 3
+    totalDays: 30
+    # Local file cache in front of the S3 disk. Lives on the ClickHouse PVC.
+    cacheSize: 10Gi
+    cold:
+      # Scheme and host only, for example http://rustfs.observability:9000.
+      # The chart appends bucket/prefix. The bucket must already exist.
+      endpoint: ""
+      bucket: ""
+      prefix: "skopos/cold"
+      region: ""
+      # Prefer existingSecret with keys access-key-id and secret-access-key.
+      # Inline credentials are only used when existingSecret is empty; the
+      # chart renders them into a Secret, never into the ConfigMap.
+      existingSecret: ""
+      accessKeyId: ""
+      secretAccessKey: ""
+  # Optional scheduled full backup to a separate S3 destination. Backups are
+  # for disaster recovery: the gateway does not query this path, restore first.
+  backup:
+    enabled: false
+    schedule: "0 2 * * *"
+    activeDeadlineSeconds: 3600
+    startingDeadlineSeconds: 600
+    successfulJobsHistoryLimit: 3
+    failedJobsHistoryLimit: 1
+    # clickhouse-client runs from the pinned ClickHouse image by default.
+    # Keep this in sync with clickhouse.image when bumping ClickHouse.
+    image:
+      repository: clickhouse/clickhouse-server
+      tag: 26.8.36.3
+      digest: sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
+      pullPolicy: IfNotPresent
+    # Must not overlap the live cold tier when storage.enabled is true; the
+    # chart refuses to render an overlapping destination.
+    endpoint: ""
+    bucket: ""
+    prefix: "skopos/backups"
+    region: ""
+    existingSecret: ""
+    accessKeyId: ""
+    secretAccessKey: ""
   persistence:
     size: 50Gi
     storageClass: ""

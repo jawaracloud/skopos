@@ -182,3 +182,7 @@ Do not over-read these numbers:
 8. **Version-sensitive.** ClickHouse schema, exporter layout, and gateway
    behavior are pinned to the alpha revisions in this repository. Re-run the
    benchmark after any schema or query-engine change.
+9. **Indexes and external storage.** These numbers predate the case-sensitive
+   `idx_body` index and the optional tiered-storage/backup settings. The extra
+   text index changes log on-disk size, and cold-tier reads have S3 latency and
+   request costs. Re-run `make bench` after enabling either.
