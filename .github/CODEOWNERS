@@ -1,0 +1,7 @@
+# Default owner for all paths. The repository currently has one human
+# maintainer with write access; add team handles here as the project grows.
+#
+# Keep this file in sync with GOVERNANCE.md. A CODEOWNERS handle that cannot
+# write to the repository is ignored by GitHub, so verify access before adding
+# a new owner.
+* @mrofisr

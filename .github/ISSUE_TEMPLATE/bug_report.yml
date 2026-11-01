@@ -1,0 +1,84 @@
+name: Bug report
+description: Report a reproducible defect in Skopos
+title: "bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security vulnerabilities here. Use the private advisory
+        process in [SECURITY.md](https://github.com/jawaracloud/skopos/blob/main/SECURITY.md).
+
+        Skopos is alpha software. Include enough detail to reproduce the problem
+        against a specific commit or chart revision.
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, queries, and chart values. Redact credentials and telemetry.
+      placeholder: |
+        1. Install with ...
+        2. Run query ...
+        3. Observe ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Version or commit
+      description: Output of `git rev-parse HEAD`, chart version, or released tag.
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Kubernetes, Helm, ClickHouse, OBI, Go, and OS versions that matter.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: signal
+    attributes:
+      label: Affected area
+      options:
+        - Metrics / PromQL
+        - Traces / TraceQL
+        - Logs / LogQL
+        - Helm chart or data plane
+        - Gateway build or health endpoints
+        - Documentation
+        - Other / unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Paste the smallest useful excerpt. Remove secrets, tokens, and user data.
+      render: shell
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed credentials and sensitive telemetry from this report.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

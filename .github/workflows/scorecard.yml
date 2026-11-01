@@ -1,0 +1,51 @@
+name: scorecard
+
+# The official ossf/scorecard-action requires GitHub Advanced Security for
+# private repositories because it uploads SARIF to code scanning. This
+# organization is on GitHub Free, so this workflow runs the pinned Scorecard
+# CLI instead and uploads JSON. It needs no GHAS and no write permissions.
+#
+# The optional GHAS-only path is in scorecard-ghas.yml.
+
+on:
+  schedule:
+    # Weekly. Offset from the top of the hour to avoid the busiest API window.
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scorecard:
+    name: OpenSSF Scorecard CLI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      # Read-only. These reads let Scorecard inspect commits, pull requests,
+      # issues, and checks on a private repository. No write access is needed.
+      contents: read
+      issues: read
+      pull-requests: read
+      checks: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run pinned Scorecard CLI
+        env:
+          GITHUB_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/scorecard.sh
+
+      - name: Upload Scorecard JSON
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: scorecard-${{ github.run_id }}-${{ github.run_attempt }}
+          path: dist/scorecard/
+          if-no-files-found: warn
+          retention-days: 30
