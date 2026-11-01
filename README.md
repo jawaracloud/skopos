@@ -43,7 +43,7 @@ existing Grafana.
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
 | OpenSSF | Measured, public | Official Scorecard action reports **7.8** and publishes the badge. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
-| Release tooling | Scaffolded | SBOM fallback, signed-image hooks, chart package, and release workflow in [docs/release.md](docs/release.md). |
+| Release tooling | Partial | Chart repository is live and the chart release is keyless-signed; image publishing, SBOM attachment, and provenance are still scaffolded. See [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
 TraceQL, and LogQL endpoints. Unsupported functions return an explicit error.
