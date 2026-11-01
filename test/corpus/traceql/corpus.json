@@ -1,0 +1,769 @@
+{
+  "version": 1,
+  "baseTimeUnixNano": "1793491200000000000",
+  "traces": [
+    {
+      "traceID": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spans": [
+        {
+          "spanID": "00f067aa0ba902b7",
+          "parentSpanID": "",
+          "name": "GET /checkout",
+          "service": "checkout",
+          "kind": "server",
+          "status": "error",
+          "statusMessage": "boom",
+          "startOffsetNanos": 0,
+          "durationNanos": 2000000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "prod"
+          },
+          "attributes": {
+            "http.method": "GET",
+            "http.status_code": 500
+          },
+          "events": [
+            {
+              "offsetNanos": 1000000000,
+              "name": "exception",
+              "attributes": {
+                "exception.type": "BadGateway",
+                "exception.message": "upstream failed"
+              }
+            }
+          ],
+          "links": [
+            {
+              "traceID": "6bf92f3577b34da6a3ce929d0e0e4738",
+              "spanID": "20f067aa0ba902b7",
+              "attributes": {
+                "rel": "retry"
+              }
+            }
+          ]
+        },
+        {
+          "spanID": "00f067aa0ba902b8",
+          "parentSpanID": "00f067aa0ba902b7",
+          "name": "SELECT orders",
+          "service": "payments",
+          "kind": "client",
+          "status": "ok",
+          "startOffsetNanos": 500000000,
+          "durationNanos": 1000000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "prod"
+          },
+          "attributes": {
+            "db.system": "postgresql",
+            "db.operation": "SELECT"
+          }
+        },
+        {
+          "spanID": "00f067aa0ba902b9",
+          "parentSpanID": "00f067aa0ba902b7",
+          "name": "redis GET",
+          "service": "checkout",
+          "kind": "internal",
+          "status": "ok",
+          "startOffsetNanos": 1200000000,
+          "durationNanos": 200000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "prod"
+          },
+          "attributes": {
+            "cache.hit": true
+          }
+        }
+      ]
+    },
+    {
+      "traceID": "5bf92f3577b34da6a3ce929d0e0e4737",
+      "spans": [
+        {
+          "spanID": "10f067aa0ba902b7",
+          "parentSpanID": "",
+          "name": "GET /cart",
+          "service": "cart",
+          "kind": "server",
+          "status": "ok",
+          "startOffsetNanos": 3000000000,
+          "durationNanos": 300000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "staging"
+          },
+          "attributes": {
+            "http.method": "GET",
+            "http.status_code": 200
+          }
+        },
+        {
+          "spanID": "10f067aa0ba902b8",
+          "parentSpanID": "10f067aa0ba902b7",
+          "name": "validate",
+          "service": "cart",
+          "kind": "internal",
+          "status": "ok",
+          "startOffsetNanos": 3100000000,
+          "durationNanos": 50000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "staging"
+          },
+          "attributes": {
+            "validation.result": "ok"
+          }
+        }
+      ]
+    },
+    {
+      "traceID": "6bf92f3577b34da6a3ce929d0e0e4738",
+      "spans": [
+        {
+          "spanID": "20f067aa0ba902b7",
+          "parentSpanID": "",
+          "name": "GET /catalog",
+          "service": "catalog",
+          "kind": "server",
+          "status": "ok",
+          "startOffsetNanos": 1000000000,
+          "durationNanos": 100000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "prod"
+          },
+          "attributes": {
+            "http.method": "GET",
+            "http.status_code": 200
+          }
+        },
+        {
+          "spanID": "20f067aa0ba902b8",
+          "parentSpanID": "20f067aa0ba902b7",
+          "name": "SELECT products",
+          "service": "catalog",
+          "kind": "client",
+          "status": "error",
+          "startOffsetNanos": 1050000000,
+          "durationNanos": 80000000,
+          "resourceAttributes": {
+            "deployment.environment.name": "prod"
+          },
+          "attributes": {
+            "db.system": "postgresql",
+            "db.operation": "SELECT"
+          }
+        }
+      ]
+    }
+  ],
+  "queries": [
+    {
+      "name": "all traces",
+      "query": "{ }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ]
+    },
+    {
+      "name": "resource service",
+      "query": "{ resource.service.name = \"checkout\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "span attribute",
+      "query": "{ span.http.method = \"GET\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "span name intrinsic",
+      "query": "{ span:name = \"GET /cart\" }",
+      "expectTraceIDs": ["5bf92f3577b34da6a3ce929d0e0e4737"],
+      "expectMatchedSpans": {
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "anchored regex with wildcard",
+      "query": "{ span:name =~ \"GET /.*\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "anchored regex has no substring match",
+      "query": "{ span:name =~ \"GET\" }",
+      "expectTraceIDs": []
+    },
+    {
+      "name": "span duration greater",
+      "query": "{ span:duration > 1s }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "span duration greater or equal",
+      "query": "{ span:duration >= 1s }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "span status error",
+      "query": "{ span:status = error }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "span status ok",
+      "query": "{ span:status = ok }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b8", "00f067aa0ba902b9"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7", "10f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "span status not ok",
+      "query": "{ span:status != ok }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "span kind client",
+      "query": "{ span:kind = client }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "span kind server",
+      "query": "{ span:kind = server }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "trace duration intrinsic",
+      "query": "{ trace:duration > 1s }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "trace duration alias",
+      "query": "{ traceDuration >= 2s }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "trace root name intrinsic",
+      "query": "{ trace:rootName = \"GET /checkout\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "root name alias",
+      "query": "{ rootName = \"GET /cart\" }",
+      "expectTraceIDs": ["5bf92f3577b34da6a3ce929d0e0e4737"],
+      "expectMatchedSpans": {
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7", "10f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "trace root service intrinsic",
+      "query": "{ trace:rootService = \"catalog\" }",
+      "expectTraceIDs": ["6bf92f3577b34da6a3ce929d0e0e4738"],
+      "expectMatchedSpans": {
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7", "20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "root service name alias",
+      "query": "{ rootServiceName = \"checkout\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "span attribute equality",
+      "query": "{ span.db.system = \"postgresql\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "not equal existing attribute",
+      "query": "{ span.db.system != \"mysql\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "not equal on missing attribute does not match",
+      "query": "{ span.missing != \"x\" }",
+      "expectTraceIDs": []
+    },
+    {
+      "name": "not regex on missing attribute does not match",
+      "query": "{ span.missing !~ \".*\" }",
+      "expectTraceIDs": []
+    },
+    {
+      "name": "not equal method has no missing matches",
+      "query": "{ span.http.method != \"GET\" }",
+      "expectTraceIDs": []
+    },
+    {
+      "name": "not equal method existing",
+      "query": "{ span.http.method != \"POST\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "regex alternation",
+      "query": "{ span.http.method =~ \"GET|POST\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "numeric comparison",
+      "query": "{ span.http.status_code >= 500 }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "numeric range",
+      "query": "{ span.http.status_code >= 400 && span.http.status_code < 600 }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "same span conjunction",
+      "query": "{ span:kind = server && span:status = error }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "scoped conjunction",
+      "query": "{ resource.service.name = \"payments\" && span:kind = client }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "or filter",
+      "query": "{ resource.service.name = \"checkout\" || resource.service.name = \"cart\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b9"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7", "10f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "event name intrinsic",
+      "query": "{ event:name = \"exception\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "event attribute",
+      "query": "{ event.exception.type = \"BadGateway\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "event time since start",
+      "query": "{ event:timeSinceStart >= 1s }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "link trace id",
+      "query": "{ link:traceID = \"6bf92f3577b34da6a3ce929d0e0e4738\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "link attribute",
+      "query": "{ link.rel = \"retry\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "event and link conjunction",
+      "query": "{ event:name = \"exception\" && link.rel = \"retry\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "unscoped resource attribute",
+      "query": "{ .deployment.environment.name = \"prod\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7", "20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "status message intrinsic",
+      "query": "{ span:statusMessage = \"boom\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "unknown kind has no match",
+      "query": "{ span:kind = producer }",
+      "expectTraceIDs": []
+    },
+    {
+      "name": "trace id intrinsic",
+      "query": "{ trace:id = \"4bf92f3577b34da6a3ce929d0e0e4736\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "span id intrinsic",
+      "query": "{ span:id = \"00f067aa0ba902b7\" }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"]
+      },
+      "skipTempo": true,
+      "note": "Tempo 2.7 search does not return results for span:id"
+    },
+    {
+      "name": "short span duration",
+      "query": "{ span:duration < 100ms }",
+      "expectTraceIDs": [
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "short trace duration",
+      "query": "{ trace:duration <= 300ms }",
+      "expectTraceIDs": [
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7", "10f067aa0ba902b8"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7", "20f067aa0ba902b8"]
+      }
+    },
+    {
+      "name": "numeric success range",
+      "query": "{ span.http.status_code >= 200 && span.http.status_code < 300 }",
+      "expectTraceIDs": [
+        "5bf92f3577b34da6a3ce929d0e0e4737",
+        "6bf92f3577b34da6a3ce929d0e0e4738"
+      ],
+      "expectMatchedSpans": {
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"],
+        "6bf92f3577b34da6a3ce929d0e0e4738": ["20f067aa0ba902b7"]
+      }
+    },
+    {
+      "name": "boolean attribute",
+      "query": "{ span.cache.hit = true }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b9"]
+      }
+    },
+    {
+      "name": "nil presence extension",
+      "query": "{ span.cache.hit != nil }",
+      "expectTraceIDs": ["4bf92f3577b34da6a3ce929d0e0e4736"],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b9"]
+      },
+      "skipTempo": true,
+      "note": "Tempo 2.7 rejects nil; this is a gateway extension"
+    },
+    {
+      "name": "pipeline rejected",
+      "query": "{ span:name = \"GET /cart\" } | count() > 1",
+      "expectError": true
+    },
+    {
+      "name": "structural rejected",
+      "query": "{ } >> { span:name = \"GET /cart\" }",
+      "expectError": true
+    },
+    {
+      "name": "multiple spansets rejected",
+      "query": "{ span:name = \"GET /cart\" } && { span:name = \"GET /checkout\" }",
+      "expectError": true
+    },
+    {
+      "name": "metrics rejected",
+      "query": "{ } | rate()",
+      "expectError": true
+    },
+    {
+      "name": "unknown trace intrinsic rejected",
+      "query": "{ trace:foo = \"bar\" }",
+      "expectError": true
+    },
+    {
+      "name": "unknown span intrinsic rejected",
+      "query": "{ span:childCount > 1 }",
+      "expectError": true
+    },
+    {
+      "name": "instrumentation attributes rejected",
+      "query": "{ instrumentation.language = \"go\" }",
+      "expectError": true
+    },
+    {
+      "name": "unbalanced query rejected",
+      "query": "{ span:name = \"GET /cart\"",
+      "expectError": true
+    }
+  ],
+  "tagNameTests": [
+    {
+      "name": "span scope",
+      "scope": "span",
+      "expect": ["cache.hit", "db.operation", "db.system", "http.method", "http.status_code", "validation.result"]
+    },
+    {
+      "name": "event scope",
+      "scope": "event",
+      "expect": ["exception.message", "exception.type"]
+    },
+    {
+      "name": "link scope",
+      "scope": "link",
+      "expect": ["rel"]
+    },
+    {
+      "name": "resource scope",
+      "scope": "resource",
+      "expect": ["deployment.environment.name", "service.name"]
+    },
+    {
+      "name": "intrinsic scope",
+      "scope": "intrinsic",
+      "expect": [
+        "duration",
+        "event:name",
+        "event:timeSinceStart",
+        "instrumentation:name",
+        "instrumentation:version",
+        "kind",
+        "name",
+        "rootName",
+        "rootServiceName",
+        "span:duration",
+        "span:kind",
+        "span:name",
+        "span:status",
+        "span:statusMessage",
+        "status",
+        "statusMessage",
+        "trace:duration",
+        "trace:rootName",
+        "trace:rootService",
+        "traceDuration"
+      ]
+    }
+  ],
+  "tagValueTests": [
+    {
+      "name": "services",
+      "tag": "resource.service.name",
+      "expect": ["cart", "catalog", "checkout", "payments"]
+    },
+    {
+      "name": "span names",
+      "tag": "span:name",
+      "expect": ["GET /cart", "GET /catalog", "GET /checkout", "SELECT orders", "SELECT products", "redis GET", "validate"]
+    },
+    {
+      "name": "event names",
+      "tag": "event:name",
+      "expect": ["exception"]
+    },
+    {
+      "name": "event attributes",
+      "tag": "event.exception.type",
+      "expect": ["BadGateway"]
+    },
+    {
+      "name": "link trace ids",
+      "tag": "link:traceID",
+      "expect": ["6bf92f3577b34da6a3ce929d0e0e4738"],
+      "skipTempo": true,
+      "note": "Tempo 2.7 search supports link:traceID but its tag-values endpoint returns empty"
+    },
+    {
+      "name": "link attributes",
+      "tag": "link.rel",
+      "expect": ["retry"]
+    },
+    {
+      "name": "root services",
+      "tag": "trace:rootService",
+      "expect": ["cart", "catalog", "checkout"]
+    },
+    {
+      "name": "statuses",
+      "tag": "span:status",
+      "expect": ["unset", "ok", "error"]
+    },
+    {
+      "name": "kinds",
+      "tag": "span:kind",
+      "expect": ["producer", "consumer", "internal", "unspecified", "client", "server"]
+    },
+    {
+      "name": "environments",
+      "tag": "resource.deployment.environment.name",
+      "expect": ["prod", "staging"]
+    }
+  ],
+  "traceTests": [
+    {
+      "traceID": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "spanCount": 3,
+      "spanIDs": ["00f067aa0ba902b7", "00f067aa0ba902b8", "00f067aa0ba902b9"],
+      "names": ["GET /checkout", "SELECT orders", "redis GET"],
+      "rootSpanID": "00f067aa0ba902b7",
+      "eventNames": ["exception"],
+      "linkTraceIDs": ["6bf92f3577b34da6a3ce929d0e0e4738"]
+    },
+    {
+      "traceID": "5bf92f3577b34da6a3ce929d0e0e4737",
+      "spanCount": 2,
+      "spanIDs": ["10f067aa0ba902b7", "10f067aa0ba902b8"],
+      "names": ["GET /cart", "validate"],
+      "rootSpanID": "10f067aa0ba902b7"
+    },
+    {
+      "traceID": "6bf92f3577b34da6a3ce929d0e0e4738",
+      "spanCount": 2,
+      "spanIDs": ["20f067aa0ba902b7", "20f067aa0ba902b8"],
+      "names": ["GET /catalog", "SELECT products"],
+      "rootSpanID": "20f067aa0ba902b7"
+    }
+  ]
+}

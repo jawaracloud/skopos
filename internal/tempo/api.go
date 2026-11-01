@@ -97,6 +97,7 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := parseLimit(r.FormValue("limit"), 20, 1000)
+	spss := parseLimit(r.FormValue("spss"), 3, 1000)
 	spans, err := a.Fetcher.FetchRange(r.Context(), start, end)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -105,15 +106,72 @@ func (a *API) handleSearch(w http.ResponseWriter, r *http.Request) {
 	summaries := Search(spans, filter, minDuration, maxDuration, limit)
 	traces := make([]map[string]any, 0, len(summaries))
 	for _, summary := range summaries {
+		spanSet := buildSpanSet(summary.MatchedSpans, spss)
 		traces = append(traces, map[string]any{
 			"traceID":           summary.TraceID,
 			"rootServiceName":   summary.RootServiceName,
 			"rootTraceName":     summary.RootTraceName,
 			"startTimeUnixNano": strconv.FormatInt(summary.Start.UnixNano(), 10),
 			"durationMs":        summary.Duration.Milliseconds(),
+			"spanSet":           spanSet,
+			"spanSets":          []any{spanSet},
+			"serviceStats":      serviceStats(summary.AllSpans),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"traces": traces, "metrics": map[string]any{}})
+}
+
+type spanSetSpan struct {
+	SpanID            string `json:"spanID"`
+	Name              string `json:"name,omitempty"`
+	StartTimeUnixNano string `json:"startTimeUnixNano"`
+	DurationNanos     string `json:"durationNanos"`
+}
+
+type spanSet struct {
+	Spans   []spanSetSpan `json:"spans"`
+	Matched int           `json:"matched"`
+}
+
+func buildSpanSet(spans []Span, limit int) spanSet {
+	out := spanSet{Spans: make([]spanSetSpan, 0, len(spans)), Matched: len(spans)}
+	for i, span := range spans {
+		if limit > 0 && i >= limit {
+			break
+		}
+		out.Spans = append(out.Spans, spanSetSpan{
+			SpanID:            span.SpanID,
+			Name:              span.SpanName,
+			StartTimeUnixNano: strconv.FormatInt(span.Timestamp.UnixNano(), 10),
+			DurationNanos:     strconv.FormatUint(span.Duration, 10),
+		})
+	}
+	return out
+}
+
+type serviceStat struct {
+	SpanCount  int `json:"spanCount"`
+	ErrorCount int `json:"errorCount,omitempty"`
+}
+
+func serviceStats(spans []Span) map[string]serviceStat {
+	out := make(map[string]serviceStat)
+	for _, span := range spans {
+		service := span.ServiceName
+		if service == "" {
+			service = span.ResourceAttributes["service.name"]
+		}
+		if service == "" {
+			continue
+		}
+		stat := out[service]
+		stat.SpanCount++
+		if strings.EqualFold(normalizeStatus(span.StatusCode), "error") {
+			stat.ErrorCount++
+		}
+		out[service] = stat
+	}
+	return out
 }
 
 func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
@@ -189,12 +247,19 @@ func (a *API) handleTagsV1(w http.ResponseWriter, r *http.Request) {
 	}
 	scope := r.FormValue("scope")
 	if scope != "" {
-		writeJSON(w, http.StatusOK, map[string]any{"tagNames": tags[scope], "metrics": map[string]any{}})
+		values, ok := tags[scope]
+		if !ok {
+			writeError(w, http.StatusBadRequest, "unknown scope "+scope)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"tagNames": values, "metrics": map[string]any{}})
 		return
 	}
+	// Tempo v1 returns the union of attribute names (resource, span, event,
+	// link) and does not include intrinsic names.
 	all := make(map[string]struct{})
-	for _, values := range tags {
-		for _, value := range values {
+	for _, name := range []string{"resource", "span", "event", "link"} {
+		for _, value := range tags[name] {
 			all[value] = struct{}{}
 		}
 	}
@@ -212,9 +277,18 @@ func (a *API) handleTagsV2(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	scopes := make([]map[string]any, 0, len(tags))
-	for _, name := range []string{"resource", "span", "intrinsic"} {
+	scope := r.FormValue("scope")
+	order := []string{"span", "event", "link", "resource", "intrinsic"}
+	scopes := make([]map[string]any, 0, len(order))
+	for _, name := range order {
+		if scope != "" && scope != name {
+			continue
+		}
 		scopes = append(scopes, map[string]any{"name": name, "tags": tags[name]})
+	}
+	if scope != "" && len(scopes) == 0 {
+		writeError(w, http.StatusBadRequest, "unknown scope "+scope)
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"scopes": scopes, "metrics": map[string]any{}})
 }
@@ -232,21 +306,15 @@ func (a *API) tags(r *http.Request) (map[string][]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	names := TagNames(nil)
+	infos := TraceInfoMap(spans)
+	filtered := make([]Span, 0, len(spans))
 	for _, span := range spans {
-		if filter != nil && !filter.Match(span) {
+		if filter != nil && !matchTrace(filter, span, infos[strings.ToLower(span.TraceID)]) {
 			continue
 		}
-		for key := range span.ResourceAttributes {
-			names["resource"][key] = struct{}{}
-		}
-		if span.ServiceName != "" {
-			names["resource"]["service.name"] = struct{}{}
-		}
-		for key := range span.SpanAttributes {
-			names["span"][key] = struct{}{}
-		}
+		filtered = append(filtered, span)
 	}
+	names := TagNames(filtered)
 	out := make(map[string][]string, len(names))
 	limit := parseLimit(r.FormValue("limit"), 1000, 10000)
 	for scope, set := range names {
@@ -278,17 +346,56 @@ func (a *API) handleTagValuesV2(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	valueType := tagValueType(r.PathValue("tag"))
 	out := make([]map[string]string, 0, len(values))
 	for _, value := range values {
-		out = append(out, map[string]string{"type": "string", "value": value})
+		out = append(out, map[string]string{"type": valueType, "value": value})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"tagValues": out, "metrics": map[string]any{}})
+}
+
+func tagValueType(tag string) string {
+	ref, err := parseKey(tag)
+	if err != nil {
+		return "string"
+	}
+	if ref.scope == "span" && ref.intrinsic && (ref.key == "status" || ref.key == "kind") {
+		return "keyword"
+	}
+	if ref.scope == "event" && ref.intrinsic && ref.key == "timeSinceStart" {
+		return "int"
+	}
+	if ref.scope == "trace" && ref.key == "duration" {
+		return "int"
+	}
+	if ref.scope == "span" && ref.intrinsic && ref.key == "duration" {
+		return "int"
+	}
+	return "string"
+}
+
+func fixedTagValues(tag string) ([]string, bool) {
+	ref, err := parseKey(tag)
+	if err != nil || ref.scope != "span" || !ref.intrinsic {
+		return nil, false
+	}
+	switch ref.key {
+	case "status":
+		return []string{"unset", "ok", "error"}, true
+	case "kind":
+		return []string{"producer", "consumer", "internal", "unspecified", "client", "server"}, true
+	default:
+		return nil, false
+	}
 }
 
 func (a *API) tagValues(r *http.Request) ([]string, error) {
 	tag := r.PathValue("tag")
 	if tag == "" {
 		return nil, fmt.Errorf("tag is required")
+	}
+	if values, ok := fixedTagValues(tag); ok {
+		return values, nil
 	}
 	start, end, err := a.timeRange(r)
 	if err != nil {
@@ -302,13 +409,16 @@ func (a *API) tagValues(r *http.Request) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	infos := TraceInfoMap(spans)
 	values := make(map[string]struct{})
 	for _, span := range spans {
-		if filter != nil && !filter.Match(span) {
+		if filter != nil && !matchTrace(filter, span, infos[strings.ToLower(span.TraceID)]) {
 			continue
 		}
-		if value, ok := SpanTag(span, tag); ok && value != "" {
-			values[value] = struct{}{}
+		for _, value := range TagValues(span, tag, infos[strings.ToLower(span.TraceID)]) {
+			if value != "" {
+				values[value] = struct{}{}
+			}
 		}
 	}
 	out := make([]string, 0, len(values))

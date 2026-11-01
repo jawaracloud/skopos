@@ -25,42 +25,91 @@ manually so the gateway does not import Tempo's AGPL-licensed proto module.
 Grafana's Tempo datasource requests v2 protobuf first and falls back to v1 on
 404.
 
+The v1 JSON response is the OTLP `resourceSpans` object. The v2 JSON response
+wraps it as `{"trace": {"resourceSpans": ...}}`, matching Tempo's v2 envelope.
+
 ## TraceQL subset
 
-A single spanset `{ ... }` with `&&` and `||` is supported. Conditions are
-`key op value` with these operators:
+The query must be exactly one spanset `{ ... }`. Conditions can be combined with
+`&&` (same span) and `||` (either condition). Supported operators:
 
 - `=`, `!=`
 - `=~`, `!~`
 - `>`, `<`, `>=`, `<=`
 
-Supported key forms:
+All regular expressions are fully anchored, as in Tempo 2.7 and later:
+`{ span.foo =~ "bar" }` is evaluated as `^(?:bar)$`. Use `.*` for substring
+matching.
 
-- `resource.<attribute>` — resource attributes; `resource.service.name` maps to
-  the exporter's `ServiceName` column.
-- `span.<attribute>` — span attributes.
-- Unscoped attributes are looked up in span attributes first, then resource
-  attributes.
-- Intrinsics: `service.name`, `name`/`span.name`/`span:name`,
-  `status`/`span.status`/`span:status`, `kind`/`span.kind`/`span:kind`,
-  `duration`/`span.duration`/`span:duration`.
+### Scopes and intrinsics
 
-Durations accept Go duration strings such as `1s`, `250ms`, or `1m`. Status and
-kind comparisons are case-insensitive. Regex matchers are fully anchored, as in
-Tempo. A condition on a missing attribute does not match, including `!=` and
-`!~`.
+| Query form | Meaning |
+| --- | --- |
+| `resource.<attr>` | Resource attribute. `resource.service.name` reads the exporter's `ServiceName` column. |
+| `span.<attr>` | Span attribute. `span.name` reads an attribute literally named `name`; if it is absent, the span intrinsic is used for backward compatibility. |
+| `event.<attr>` | Event attribute; matches if any event on the span has the value. |
+| `link.<attr>` | Link attribute; matches if any link on the span has the value. |
+| Unscoped `<attr>` | Span attribute first, then resource attribute. |
+| `.<attr>` | Explicitly unscoped; no intrinsic fallback. |
+| `span:name` | Span name intrinsic. |
+| `span:duration` | Span duration intrinsic. |
+| `span:status` | Span status enum: `error`, `ok`, `unset`. Case-insensitive. |
+| `span:statusMessage` | Span status message. |
+| `span:kind` | Span kind enum: `server`, `client`, `producer`, `consumer`, `internal`, `unspecified`. Case-insensitive. |
+| `span:id`, `span:parentID`, `span:traceID` | Hex IDs. |
+| `trace:duration` | `max(end) - min(start)` over the fetched spans of the trace. |
+| `trace:rootName` | Name of the earliest root span (empty parent ID), if one exists. |
+| `trace:rootService` | Service name of the earliest root span, if one exists. |
+| `trace:id` | Hex trace ID. |
+| `event:name` | Event name intrinsic; matches if any event has the name. |
+| `event:timeSinceStart` | Event timestamp minus span start, as a duration. |
+| `link:traceID`, `link:spanID`, `link:traceState` | Link IDs/trace state. |
+| `instrumentation:name`, `instrumentation:version` | Instrumentation scope name/version. |
+
+Aliases accepted for Grafana and Tempo compatibility:
+
+- `name`, `duration`, `status`, `statusMessage`, `kind` are the span intrinsics.
+- `traceDuration` is `trace:duration`.
+- `rootName` is `trace:rootName`.
+- `rootService`, `rootServiceName`, `trace:rootServiceName` are
+  `trace:rootService`.
+- `trace:id`, `span:id`, and link IDs are compared case-insensitively.
+- `link:traceId`/`link:spanId` are accepted as aliases for `link:traceID`/`link:spanID`.
+
+Durations accept Go duration strings such as `1s`, `250ms`, `1m`, or `1h`.
+Bare numbers are numeric comparisons. Quoted strings compare lexicographically
+for `>`/`<`, matching Tempo.
+
+### Missing attributes and `nil`
+
+A condition on a missing attribute does not match, including `!=` and `!~`.
+This matches Tempo 2.7: `{ span.missing != "x" }` returns no traces. It is not
+the same as `{ span.missing = nil }`.
+
+As a gateway extension, `= nil` and `!= nil` test attribute presence:
+
+- `{ span.cache.hit != nil }` matches spans where the attribute exists.
+- `{ span.missing = nil }` matches spans where the attribute does not exist.
+- `!= nil` on a missing attribute is false; `= nil` on an existing attribute is
+  false.
+
+Tempo 2.7 itself rejects `nil` (support was added in Tempo 2.10), so corpus
+queries that use `nil` are marked gateway-only in the differential harness.
 
 ## Tag-based search
 
 Tempo's `tags=` parameter is supported as logfmt-like key/value pairs. Values
-are matched as case-insensitive substrings, as in Tempo.
+are matched as case-insensitive substrings, as in Tempo. Scoped keys such as
+`span.http.method=GET` and `resource.service.name=checkout` are supported.
 
-`minDuration`, `maxDuration`, `limit`, `start`, and `end` are supported.
-`start`/`end` accept Unix seconds or RFC3339.
+`minDuration`, `maxDuration`, `limit`, and `spss` are supported. `start`/`end`
+accept Unix seconds or RFC3339. `spss` is the maximum number of matched spans
+returned per span set (default 3, maximum 1000).
 
 ## Search response
 
-Search returns trace summaries:
+Search returns trace summaries with root information, matched span sets, and
+service statistics:
 
 ```json
 {
@@ -70,30 +119,98 @@ Search returns trace summaries:
       "rootServiceName": "checkout",
       "rootTraceName": "GET /checkout",
       "startTimeUnixNano": "1793491200000000000",
-      "durationMs": 2000
+      "durationMs": 2000,
+      "spanSet": {
+        "spans": [
+          {
+            "spanID": "00f067aa0ba902b7",
+            "name": "GET /checkout",
+            "startTimeUnixNano": "1793491200000000000",
+            "durationNanos": "2000000000"
+          }
+        ],
+        "matched": 1
+      },
+      "spanSets": [ { "spans": [ ... ], "matched": 1 } ],
+      "serviceStats": {
+        "checkout": { "spanCount": 1, "errorCount": 1 }
+      }
     }
   ],
   "metrics": {}
 }
 ```
 
-`spanSets` are not included yet.
+`spanSets[0].spans` contains up to `spss` matched spans. `matched` is the total
+number of matched spans in the trace before the `spss` truncation. `spanSet`
+(singular) is included for older clients. `serviceStats` counts every fetched
+span in the trace, not only the matched spans, and matches Tempo's behavior.
+
+The root service, root name, start time, and duration are computed from every
+fetched span in the trace. A filtered query that matches only a child span still
+reports the real root and the full trace duration.
+
+## Tag names and values
+
+`/api/search/tags` (v1) returns the union of resource, span, event, and link
+attribute names, matching Tempo v1. `/api/v2/search/tags` returns the five Tempo
+scopes in Tempo order: `span`, `event`, `link`, `resource`, and `intrinsic`.
+The intrinsic list includes `trace:duration`, `trace:rootName`,
+`trace:rootService`, `event:name`, `event:timeSinceStart`, `span:*`, and the
+unscoped aliases.
+
+`/api/v2/search/tag/{tag}/values` accepts scoped names such as
+`resource.service.name`, `span:name`, `event.exception.type`,
+`link:traceID`, and `trace:rootService`. `span:status` and `span:kind` return
+Tempo's fixed enum value sets. Event and link attributes are read from the
+exporter's `Events.Attributes` and `Links.Attributes` nested columns.
 
 ## Known limitations
 
-- No structural operators (`>>`, `<<`, `~`), pipelines, trace-level queries,
-  metrics queries, or multiple spansets.
-- No event/link scopes in TraceQL; tags endpoints expose resource, span, and
-  intrinsic scopes.
-- Search summaries use the matched spans in the requested time range. A partial
-  time range can therefore produce a partial root/duration.
-- No pagination or `spss` span-set limiting.
+- No structural operators (`>>`, `<<`, `>`, `<`, `~`, `!>>`, ...), pipelines,
+  aggregations, grouping, `select()`, trace-level multi-spanset queries, or
+  TraceQL metrics queries. These return an explicit error.
+- No multiple spansets. `{a} && {b}` is rejected even though Tempo supports it.
+- Event and link conditions are evaluated against any event/link on the span;
+  the gateway does not yet enforce that two event conditions refer to the same
+  event object.
+- Trace-level intrinsics are computed from the spans fetched in the requested
+  time range. A partial time range can therefore produce a partial root and
+  duration, as noted by Tempo for partial traces.
+- Search summaries use the matched spans in the requested time range.
+- `span:id` search works in the gateway but Tempo 2.7 search returns no results
+  for it; the differential corpus marks it gateway-only.
+- Tempo 2.7's tag-values endpoint returns an empty list for `link:traceID`; the
+  gateway returns the link IDs. The differential corpus marks this gateway-only.
+- No pagination and no `most_recent` hint.
 - The maximum query range is 7 days and the gateway enforces a row scan limit
   (default 200,000).
 
 ## Tests
 
-- Unit tests for the TraceQL subset, tag search, and search grouping.
-- API tests for JSON and protobuf trace responses, tags, tag values, echo, and
-  error handling.
-- Integration tests against ClickHouse 26.8 with real `otel_traces` rows.
+Run the deterministic corpus against the in-memory API and the parser:
+
+```sh
+go test ./internal/tempo ./test/corpus/traceql
+```
+
+Run the corpus against a real ClickHouse 26.8 instance:
+
+```sh
+CLICKHOUSE_URL=http://127.0.0.1:8123 go test -tags=integration ./internal/tempo
+```
+
+Run the Tempo differential harness (Docker required; pins
+`grafana/tempo:2.7.2` and compares search, span sets, trace-by-id, tag names,
+and tag values):
+
+```sh
+test/compat/tempo/run.sh
+# or
+TEMPO_COMPAT=1 go test ./test/compat/tempo -run TestDifferential -v
+```
+
+The harness starts Tempo with a one-hour live-trace window. It sends the same
+corpus as OTLP/HTTP JSON to Tempo and seeds the gateway's API with the same
+spans, then compares both. It does not link or vendor Tempo code and does not
+introduce an AGPL dependency.
