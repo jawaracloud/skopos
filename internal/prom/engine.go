@@ -221,7 +221,7 @@ func (e *evalCtx) evalVectorSelector(vs *parser.VectorSelector) (Value, error) {
 			continue
 		}
 		last := s.Samples[idx-1]
-		if last.T < startMs {
+		if last.T <= startMs {
 			continue
 		}
 		out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: e.at.UnixMilli(), SampleT: last.T, V: last.V})
@@ -249,7 +249,9 @@ func (e *evalCtx) evalMatrixSelector(ms *parser.MatrixSelector) (Value, error) {
 	endMs := end.UnixMilli()
 	out := make(Matrix, 0, len(series))
 	for _, s := range series {
-		startIdx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T >= startMs })
+		// Prometheus range selectors are left-open: the sample exactly at
+		// evaluation time minus the range is excluded.
+		startIdx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T > startMs })
 		endIdx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T > endMs })
 		if startIdx >= endIdx {
 			continue
@@ -385,13 +387,24 @@ func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		sort.Slice(v, func(i, j int) bool {
+		sort.SliceStable(v, func(i, j int) bool {
+			// NaN sorts to the bottom in both directions, matching Prometheus.
+			if math.IsNaN(v[i].V) {
+				return false
+			}
+			if math.IsNaN(v[j].V) {
+				return true
+			}
 			if name == "sort_desc" {
 				return v[i].V > v[j].V
 			}
 			return v[i].V < v[j].V
 		})
 		return v, nil
+	case "absent", "absent_over_time":
+		return e.evalAbsent(name, call)
+	case "label_replace", "label_join":
+		return e.evalLabelFunction(name, call)
 	default:
 		return nil, fmt.Errorf("prom: unsupported function %q", name)
 	}
@@ -501,6 +514,14 @@ func (e *evalCtx) rateLike(name string, matrix Matrix, rangeStart, rangeEnd time
 			if durationToStart >= threshold {
 				durationToStart = average / 2
 			}
+			// Counters cannot be negative. If the counter has any slope,
+			// extrapolate its zero point and do not go further left than that.
+			if increase > 0 && samples[0].V >= 0 {
+				durationToZero := sampledInterval * (samples[0].V / increase)
+				if durationToZero < durationToStart {
+					durationToStart = durationToZero
+				}
+			}
 			if durationToEnd >= threshold {
 				durationToEnd = average / 2
 			}
@@ -533,42 +554,86 @@ func (e *evalCtx) overTime(name string, matrix Matrix) Vector {
 		var value float64
 		switch name {
 		case "avg_over_time":
-			value = mean(values)
+			sum, c := 0.0, 0.0
+			for _, v := range values {
+				sum, c = kahanAdd(v, sum, c)
+			}
+			value = sum/float64(len(values)) + c/float64(len(values))
+			if math.IsInf(sum, 0) {
+				value = sum
+			}
 		case "min_over_time":
 			value = values[0]
 			for _, v := range values[1:] {
-				if v < value {
+				if v < value || math.IsNaN(value) {
 					value = v
 				}
 			}
 		case "max_over_time":
 			value = values[0]
 			for _, v := range values[1:] {
-				if v > value {
+				if v > value || math.IsNaN(value) {
 					value = v
 				}
 			}
 		case "sum_over_time":
+			sum, c := 0.0, 0.0
 			for _, v := range values {
-				value += v
+				sum, c = kahanAdd(v, sum, c)
+			}
+			if math.IsInf(sum, 0) {
+				value = sum
+			} else {
+				value = sum + c
 			}
 		case "count_over_time":
 			value = float64(len(values))
 		case "last_over_time":
 			value = values[len(values)-1]
 		case "stddev_over_time":
-			value = math.Sqrt(variance(values))
+			value = math.Sqrt(varianceOverTime(values))
 		case "stdvar_over_time":
-			value = variance(values)
+			value = varianceOverTime(values)
 		case "present_over_time":
 			value = 1
 		}
 		labels := cloneLabels(series.Labels)
-		delete(labels, promlabels.MetricName)
+		// last_over_time acts like an offset and keeps the metric name.
+		if name != "last_over_time" {
+			delete(labels, promlabels.MetricName)
+		}
 		out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: value})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out
+}
+
+// kahanAdd performs one Kahan-Neumaier summation step, matching the
+// compensated summation used by the reference Prometheus evaluator.
+func kahanAdd(inc, sum, c float64) (float64, float64) {
+	t := sum + inc
+	switch {
+	case math.IsInf(t, 0):
+		c = 0
+	case math.Abs(sum) >= math.Abs(inc):
+		c += (sum - t) + inc
+	default:
+		c += (inc - t) + sum
+	}
+	return t, c
+}
+
+// varianceOverTime implements the same compensated Welford update as the
+// reference evaluator (population variance).
+func varianceOverTime(values []float64) float64 {
+	var count, mean, cMean, aux, cAux float64
+	for _, v := range values {
+		count++
+		delta := v - (mean + cMean)
+		mean, cMean = kahanAdd(delta/count, mean, cMean)
+		aux, cAux = kahanAdd(delta*(v-(mean+cMean)), aux, cAux)
+	}
+	return (aux + cAux) / count
 }
 
 func (e *evalCtx) quantileOverTime(q float64, matrix Matrix) Vector {
@@ -646,15 +711,15 @@ func (e *evalCtx) evalRound(call *parser.Call) (Value, error) {
 			return nil, err
 		}
 		toNearest = float64(s)
-		if toNearest == 0 {
-			toNearest = 1
-		}
 	}
 	v, err := e.eval(call.Args[0])
 	if err != nil {
 		return nil, err
 	}
-	round := func(x float64) float64 { return math.Round(x/toNearest) * toNearest }
+	// Inverting first avoids some floating point accuracy issues and matches
+	// the reference implementation, including its behaviour for a zero step.
+	toNearestInverse := 1.0 / toNearest
+	round := func(x float64) float64 { return math.Floor(x*toNearestInverse+0.5) / toNearestInverse }
 	switch value := v.(type) {
 	case Scalar:
 		return Scalar(round(float64(value))), nil
@@ -710,12 +775,20 @@ func (e *evalCtx) evalClamp(name string, call *parser.Call) (Value, error) {
 	if err != nil {
 		return nil, err
 	}
-	clamp := func(x float64) float64 {
-		if min != nil && x < *min {
-			x = *min
+	if min != nil && max != nil && *max < *min {
+		switch v.(type) {
+		case Scalar:
+			return Scalar(math.NaN()), nil
+		default:
+			return Vector{}, nil
 		}
-		if max != nil && x > *max {
-			x = *max
+	}
+	clamp := func(x float64) float64 {
+		if min != nil {
+			x = math.Max(*min, x)
+		}
+		if max != nil {
+			x = math.Min(*max, x)
 		}
 		return x
 	}
@@ -742,6 +815,10 @@ func ptr(v float64) *float64 { return &v }
 func (e *evalCtx) evalAggregate(agg *parser.AggregateExpr) (Value, error) {
 	op := agg.Op.String()
 	switch op {
+	case "topk", "bottomk":
+		return e.evalAggregateK(agg, op)
+	case "count_values":
+		return e.evalCountValues(agg)
 	case "sum", "avg", "min", "max", "count", "stddev", "stdvar", "group":
 	default:
 		return nil, fmt.Errorf("prom: unsupported aggregation %q", op)
@@ -826,10 +903,6 @@ func aggregateLabels(in map[string]string, grouping []string, without bool) map[
 
 func (e *evalCtx) evalBinary(bin *parser.BinaryExpr) (Value, error) {
 	op := bin.Op.String()
-	switch op {
-	case "and", "or", "unless":
-		return nil, fmt.Errorf("prom: set operator %q is not supported", op)
-	}
 	lhs, err := e.eval(bin.LHS)
 	if err != nil {
 		return nil, err
@@ -837,6 +910,17 @@ func (e *evalCtx) evalBinary(bin *parser.BinaryExpr) (Value, error) {
 	rhs, err := e.eval(bin.RHS)
 	if err != nil {
 		return nil, err
+	}
+	if op == "and" || op == "or" || op == "unless" {
+		left, ok := lhs.(Vector)
+		if !ok {
+			return nil, fmt.Errorf("prom: set operator %q expects a vector on the left", op)
+		}
+		right, ok := rhs.(Vector)
+		if !ok {
+			return nil, fmt.Errorf("prom: set operator %q expects a vector on the right", op)
+		}
+		return e.setBinary(op, left, right, bin.VectorMatching), nil
 	}
 	switch l := lhs.(type) {
 	case Scalar:
@@ -864,6 +948,47 @@ func (e *evalCtx) evalBinary(bin *parser.BinaryExpr) (Value, error) {
 	return nil, fmt.Errorf("prom: unsupported binary operand types %T and %T", lhs, rhs)
 }
 
+func (e *evalCtx) setBinary(op string, lhs, rhs Vector, matching *parser.VectorMatching) Vector {
+	if matching == nil {
+		matching = &parser.VectorMatching{}
+	}
+	rightKeys := make(map[string]struct{}, len(rhs))
+	for _, sample := range rhs {
+		rightKeys[matchingKey(sample.Labels, matching)] = struct{}{}
+	}
+	leftKeys := make(map[string]struct{}, len(lhs))
+	out := make(Vector, 0, len(lhs))
+	switch op {
+	case "and":
+		for _, sample := range lhs {
+			key := matchingKey(sample.Labels, matching)
+			if _, ok := rightKeys[key]; ok {
+				out = append(out, VectorSample{Labels: cloneLabels(sample.Labels), T: e.at.UnixMilli(), V: sample.V})
+			}
+		}
+	case "unless":
+		for _, sample := range lhs {
+			key := matchingKey(sample.Labels, matching)
+			if _, ok := rightKeys[key]; !ok {
+				out = append(out, VectorSample{Labels: cloneLabels(sample.Labels), T: e.at.UnixMilli(), V: sample.V})
+			}
+		}
+	case "or":
+		for _, sample := range lhs {
+			key := matchingKey(sample.Labels, matching)
+			leftKeys[key] = struct{}{}
+			out = append(out, VectorSample{Labels: cloneLabels(sample.Labels), T: e.at.UnixMilli(), V: sample.V})
+		}
+		for _, sample := range rhs {
+			if _, ok := leftKeys[matchingKey(sample.Labels, matching)]; !ok {
+				out = append(out, VectorSample{Labels: cloneLabels(sample.Labels), T: e.at.UnixMilli(), V: sample.V})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
+	return out
+}
+
 func applyScalarVector(op string, scalar float64, vec Vector, scalarLeft, returnBool bool, at time.Time) Vector {
 	out := make(Vector, 0, len(vec))
 	for _, sample := range vec {
@@ -878,6 +1003,11 @@ func applyScalarVector(op string, scalar float64, vec Vector, scalarLeft, return
 		if err != nil || !keep {
 			continue
 		}
+		// Comparisons keep the vector element's value, even when the scalar is
+		// on the left-hand side.
+		if isComparison(op) && !returnBool {
+			v = sample.V
+		}
 		labels := cloneLabels(sample.Labels)
 		if isArithmetic(op) || (isComparison(op) && returnBool) {
 			delete(labels, promlabels.MetricName)
@@ -891,36 +1021,99 @@ func (e *evalCtx) vectorBinary(op string, lhs, rhs Vector, matching *parser.Vect
 	if matching == nil {
 		matching = &parser.VectorMatching{}
 	}
-	if len(matching.Include) > 0 || matching.Card != parser.CardOneToOne {
-		return nil, errors.New("prom: group_left/group_right and many-to-many matching are not supported")
+	if matching.FillValues.LHS != nil || matching.FillValues.RHS != nil {
+		return nil, errors.New("prom: binary fill-in modifiers are not supported")
+	}
+	if matching.Card == parser.CardManyToMany {
+		return nil, errors.New("prom: many-to-many matching is only valid for set operators")
+	}
+	// Normalize one-to-many matching by swapping sides. The left side is then
+	// always the "many" side, which is where the result labels come from.
+	swapped := matching.Card == parser.CardOneToMany
+	if swapped {
+		lhs, rhs = rhs, lhs
 	}
 	rightByKey := make(map[string]VectorSample, len(rhs))
-	for _, s := range rhs {
-		key := matchingKey(s.Labels, matching)
+	for _, sample := range rhs {
+		key := matchingKey(sample.Labels, matching)
 		if _, exists := rightByKey[key]; exists {
 			return nil, errors.New("prom: many-to-many matching is not supported")
 		}
-		rightByKey[key] = s
+		rightByKey[key] = sample
 	}
+	matched := make(map[string]struct{}, len(lhs))
+	matchedOutputs := make(map[string]map[string]struct{}, len(lhs))
 	out := make(Vector, 0, len(lhs))
 	for _, left := range lhs {
-		right, ok := rightByKey[matchingKey(left.Labels, matching)]
+		key := matchingKey(left.Labels, matching)
+		right, ok := rightByKey[key]
 		if !ok {
 			continue
 		}
-		v, keep, err := binaryValue(op, left.V, right.V, returnBool)
+		if matching.Card == parser.CardOneToOne {
+			if _, exists := matched[key]; exists {
+				return nil, errors.New("prom: multiple matches for labels: many-to-one matching must be explicit (group_left/group_right)")
+			}
+			matched[key] = struct{}{}
+		}
+		a, b := left.V, right.V
+		if swapped {
+			a, b = right.V, left.V
+		}
+		v, keep, err := binaryValue(op, a, b, returnBool)
 		if err != nil {
 			return nil, err
 		}
 		if !keep {
 			continue
 		}
-		labels := cloneLabels(left.Labels)
-		delete(labels, promlabels.MetricName)
+		labels := binaryResultLabels(left.Labels, right.Labels, op, matching, returnBool)
+		if matching.Card != parser.CardOneToOne {
+			outputKey := labelsKey(labels)
+			if matchedOutputs[key] == nil {
+				matchedOutputs[key] = make(map[string]struct{})
+			}
+			if _, exists := matchedOutputs[key][outputKey]; exists {
+				return nil, errors.New("prom: multiple matches for labels: grouping labels must ensure unique matches")
+			}
+			matchedOutputs[key][outputKey] = struct{}{}
+		}
 		out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: v})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out, nil
+}
+
+func binaryResultLabels(left, right map[string]string, op string, matching *parser.VectorMatching, returnBool bool) map[string]string {
+	labels := cloneLabels(left)
+	if isArithmetic(op) || (isComparison(op) && returnBool) {
+		delete(labels, promlabels.MetricName)
+	}
+	if matching.Card == parser.CardOneToOne {
+		if matching.On {
+			keep := make(map[string]struct{}, len(matching.MatchingLabels))
+			for _, name := range matching.MatchingLabels {
+				keep[name] = struct{}{}
+			}
+			for name := range labels {
+				if _, ok := keep[name]; !ok {
+					delete(labels, name)
+				}
+			}
+		} else {
+			for _, name := range matching.MatchingLabels {
+				delete(labels, name)
+			}
+		}
+	}
+	for _, name := range matching.Include {
+		if value := right[name]; value != "" {
+			labels[name] = value
+		} else {
+			delete(labels, name)
+		}
+	}
+	return labels
 }
 
 func matchingKey(l map[string]string, matching *parser.VectorMatching) string {
@@ -1014,7 +1207,12 @@ func (e *evalCtx) evalUnary(un *parser.UnaryExpr) (Value, error) {
 		return nil, err
 	}
 	op := un.Op.String()
-	if op != "-" {
+	switch op {
+	case "+":
+		// Unary plus is an identity operation, including the metric name.
+		return v, nil
+	case "-":
+	default:
 		return nil, fmt.Errorf("prom: unsupported unary operator %q", op)
 	}
 	switch value := v.(type) {
@@ -1120,15 +1318,19 @@ func quantileSorted(q float64, values []float64) float64 {
 	return values[lower]*(1-weight) + values[upper]*weight
 }
 
-// histogramQuantile implements the standard Prometheus bucket interpolation
-// for a vector of cumulative bucket series carrying an "le" label.
+// histogramQuantile implements the reference Prometheus classic-histogram
+// quantile algorithm, including the required +Inf bucket, bucket coalescing,
+// monotonicity repair, and special handling for out-of-range quantiles.
 func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
-	type group struct {
-		labels map[string]string
-		bound  float64
-		count  float64
+	type bucket struct {
+		bound float64
+		count float64
 	}
-	groups := make(map[string][]group)
+	type histogram struct {
+		labels  map[string]string
+		buckets []bucket
+	}
+	groups := make(map[string]*histogram)
 	for _, sample := range buckets {
 		le, ok := sample.Labels["le"]
 		if !ok {
@@ -1142,47 +1344,92 @@ func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
 		delete(labels, "le")
 		delete(labels, promlabels.MetricName)
 		key := labelsKey(labels)
-		groups[key] = append(groups[key], group{labels: labels, bound: bound, count: sample.V})
+		group := groups[key]
+		if group == nil {
+			group = &histogram{labels: labels}
+			groups[key] = group
+		}
+		group.buckets = append(group.buckets, bucket{bound: bound, count: sample.V})
 	}
 	out := make(Vector, 0, len(groups))
-	for _, buckets := range groups {
-		if len(buckets) < 2 {
-			continue
-		}
+	for _, group := range groups {
+		buckets := group.buckets
 		sort.Slice(buckets, func(i, j int) bool { return buckets[i].bound < buckets[j].bound })
-		total := buckets[len(buckets)-1].count
-		if total <= 0 || math.IsNaN(total) {
-			out = append(out, VectorSample{Labels: buckets[0].labels, T: at.UnixMilli(), V: math.NaN()})
-			continue
-		}
-		rank := q * total
-		value := math.Inf(1)
-		prevBound := 0.0
-		prevCount := 0.0
-		for i, b := range buckets {
-			if b.count >= rank {
-				if math.IsInf(b.bound, 1) {
-					value = prevBound
-					break
-				}
-				denominator := b.count - prevCount
-				if denominator <= 0 {
-					value = prevBound
-					break
-				}
-				if i == 0 {
-					value = (rank - prevCount) / denominator * b.bound
-				} else {
-					span := b.bound - prevBound
-					value = prevBound + (rank-prevCount)/denominator*span
-				}
-				break
+		// Coalesce duplicate upper bounds by summing their counts.
+		coalesced := buckets[:0]
+		for _, current := range buckets {
+			if len(coalesced) > 0 && current.bound == coalesced[len(coalesced)-1].bound {
+				coalesced[len(coalesced)-1].count += current.count
+				continue
 			}
-			prevBound = b.bound
-			prevCount = b.count
+			coalesced = append(coalesced, current)
 		}
-		out = append(out, VectorSample{Labels: buckets[0].labels, T: at.UnixMilli(), V: value})
+		buckets = coalesced
+		// Repair non-monotonic bucket counts the same way Prometheus does.
+		prev := buckets[0].count
+		for i := 1; i < len(buckets); i++ {
+			current := buckets[i].count
+			if current == prev {
+				continue
+			}
+			if almostEqualBucketCounts(prev, current) {
+				buckets[i].count = prev
+				continue
+			}
+			if current < prev {
+				buckets[i].count = prev
+				continue
+			}
+			prev = current
+		}
+
+		value := math.NaN()
+		switch {
+		case math.IsNaN(q):
+			// NaN.
+		case q < 0:
+			value = math.Inf(-1)
+		case q > 1:
+			value = math.Inf(1)
+		case len(buckets) < 2 || !math.IsInf(buckets[len(buckets)-1].bound, 1):
+			// A missing +Inf bucket or too few buckets cannot be interpolated.
+		default:
+			observations := buckets[len(buckets)-1].count
+			if observations != 0 {
+				rank := q * observations
+				b := sort.Search(len(buckets)-1, func(i int) bool { return buckets[i].count >= rank })
+				switch {
+				case b == len(buckets)-1:
+					value = buckets[len(buckets)-2].bound
+				case b == 0 && buckets[0].bound <= 0:
+					value = buckets[0].bound
+				default:
+					bucketStart := 0.0
+					bucketEnd := buckets[b].bound
+					count := buckets[b].count
+					if b > 0 {
+						bucketStart = buckets[b-1].bound
+						count -= buckets[b-1].count
+						rank -= buckets[b-1].count
+					}
+					value = bucketStart + (bucketEnd-bucketStart)*(rank/count)
+				}
+			}
+		}
+		out = append(out, VectorSample{Labels: group.labels, T: at.UnixMilli(), V: value})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out
+}
+
+func almostEqualBucketCounts(a, b float64) bool {
+	if a == b {
+		return true
+	}
+	diff := math.Abs(a - b)
+	sum := math.Abs(a) + math.Abs(b)
+	if sum < math.SmallestNonzeroFloat64 {
+		return diff < 1e-12*math.SmallestNonzeroFloat64
+	}
+	return diff/sum < 1e-12
 }

@@ -60,6 +60,17 @@ func TestIntegrationPrometheusAPI(t *testing.T) {
 		"Attributes Map(String, String), Count UInt64, Sum Float64, " +
 		"BucketCounts Array(UInt64), ExplicitBounds Array(Float64)) " +
 		"ENGINE = MergeTree ORDER BY (MetricName, TimeUnix)")
+	exec("CREATE TABLE `" + database + "`.`otel_metrics_summary` (" +
+		"MetricName LowCardinality(String), TimeUnix DateTime, " +
+		"ServiceName LowCardinality(String), MetricDescription String, MetricUnit String, " +
+		"Attributes Map(String, String), Count UInt64, Sum Float64, " +
+		"ValueAtQuantiles Nested (Quantile Float64, Value Float64)) " +
+		"ENGINE = MergeTree ORDER BY (MetricName, TimeUnix)")
+	exec("CREATE TABLE `" + database + "`.`otel_metrics_exponential_histogram` (" +
+		"MetricName LowCardinality(String), TimeUnix DateTime, " +
+		"ServiceName LowCardinality(String), MetricDescription String, MetricUnit String, " +
+		"Attributes Map(String, String), Count UInt64, Sum Float64) " +
+		"ENGINE = MergeTree ORDER BY (MetricName, TimeUnix)")
 
 	gaugeRows := []string{
 		`{"MetricName":"http_requests_total","TimeUnix":"2026-11-01 00:00:30","Value":1,"ServiceName":"checkout","MetricDescription":"requests","MetricUnit":"1","Attributes":{"http.method":"GET"}}`,
@@ -76,6 +87,12 @@ func TestIntegrationPrometheusAPI(t *testing.T) {
 		`{"MetricName":"http_request_duration","TimeUnix":"2026-11-01 00:05:00","ServiceName":"checkout","MetricDescription":"duration","MetricUnit":"s","Attributes":{"http.method":"GET"},"Count":10,"Sum":5.0,"BucketCounts":[2,4,2,2],"ExplicitBounds":[0.1,0.5,1]}`,
 	}
 	exec("INSERT INTO `" + database + "`.`otel_metrics_histogram` FORMAT JSONEachRow\n" + strings.Join(histRows, "\n"))
+	summaryRows := []string{
+		`{"MetricName":"rpc_duration","TimeUnix":"2026-11-01 00:05:00","ServiceName":"checkout","MetricDescription":"rpc duration","MetricUnit":"s","Attributes":{"rpc.system":"grpc"},"Count":10,"Sum":1.5,"ValueAtQuantiles.Quantile":[0.5,0.99],"ValueAtQuantiles.Value":[0.2,0.4]}`,
+	}
+	exec("INSERT INTO `" + database + "`.`otel_metrics_summary` FORMAT JSONEachRow\n" + strings.Join(summaryRows, "\n"))
+	exec("INSERT INTO `" + database + "`.`otel_metrics_exponential_histogram` FORMAT JSONEachRow\n" +
+		`{"MetricName":"rpc_latency","TimeUnix":"2026-11-01 00:05:00","ServiceName":"checkout","MetricDescription":"rpc latency","MetricUnit":"s","Attributes":{},"Count":4,"Sum":1.0}`)
 
 	client, err := chclient.New(chclient.Config{
 		BaseURL:          baseURL,
@@ -149,7 +166,7 @@ func TestIntegrationPrometheusAPI(t *testing.T) {
 		}
 	}
 
-	data = get("/api/v1/query?query=" + url.QueryEscape(`histogram_quantile(0.5, rate(http_request_duration_bucket[5m]))`) + "&time=2026-11-01T00:05:00Z")
+	data = get("/api/v1/query?query=" + url.QueryEscape(`histogram_quantile(0.5, http_request_duration_bucket)`) + "&time=2026-11-01T00:05:00Z")
 	histResult := data["result"].([]any)
 	if len(histResult) != 1 {
 		t.Fatalf("histogram result = %#v", histResult)
@@ -164,6 +181,42 @@ func TestIntegrationPrometheusAPI(t *testing.T) {
 		t.Fatalf("metadata missing metric: %#v", data)
 	}
 
+	// Summary metrics are expanded into _count, _sum, and quantile series.
+	data = get("/api/v1/query?query=" + url.QueryEscape(`rpc_duration{quantile="0.5"}`) + "&time=2026-11-01T00:05:00Z")
+	summaryResult := data["result"].([]any)
+	if len(summaryResult) != 1 {
+		t.Fatalf("summary result = %#v", summaryResult)
+	}
+	summaryValue := summaryResult[0].(map[string]any)["value"].([]any)
+	if got, err := strconvParse(summaryValue[1]); err != nil || math.Abs(got-0.2) > 1e-9 {
+		t.Fatalf("summary quantile = %#v, want 0.2", summaryValue)
+	}
+	data = get("/api/v1/query?query=" + url.QueryEscape(`rpc_duration_count`) + "&time=2026-11-01T00:05:00Z")
+	countResult := data["result"].([]any)
+	if len(countResult) != 1 {
+		t.Fatalf("summary count result = %#v", countResult)
+	}
+	countValue := countResult[0].(map[string]any)["value"].([]any)
+	if got, err := strconvParse(countValue[1]); err != nil || got != 10 {
+		t.Fatalf("summary count = %#v, want 10", countValue)
+	}
+	data = get("/api/v1/metadata?metric=rpc_duration")
+	summaryMeta, ok := data["rpc_duration"].([]any)
+	if !ok || len(summaryMeta) != 1 || summaryMeta[0].(map[string]any)["type"] != "summary" {
+		t.Fatalf("summary metadata = %#v", data)
+	}
+
+	// Exponential histograms are stored but not queryable; the error must be
+	// explicit rather than an empty result.
+	resp, err := http.Get(server.URL + "/api/v1/query?query=" + url.QueryEscape(`rpc_latency`) + "&time=2026-11-01T00:05:00Z")
+	if err != nil {
+		t.Fatalf("exponential histogram query: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "exponential histogram") {
+		t.Fatalf("exponential histogram query = %d %s", resp.StatusCode, body)
+	}
 }
 
 func strconvParse(v any) (float64, error) {
