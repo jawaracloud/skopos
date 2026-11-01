@@ -47,6 +47,11 @@ jobs:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
+          # Optional fine-grained PAT with Administration: read-only. Without
+          # it, the action uses GITHUB_TOKEN and the Branch-Protection check
+          # reports an internal error because that token cannot read classic
+          # branch protection rules. Uncomment after creating the secret.
+          # repo_token: ${{ secrets.SCORECARD_TOKEN }}
 
       - name: Upload SARIF artifact
         if: always()
