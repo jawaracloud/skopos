@@ -1,0 +1,79 @@
+# OBI configuration v2 for the Docker Compose end-to-end harness.
+#
+# This mirrors the chart's OBI shape (extension v2, capture policy, OTLP/gRPC
+# exporters, Kubernetes enrichment disabled) but selects exactly one container
+# workload by its listening port so the test is deterministic.
+file_format: "1.0"
+log_level: "info"
+
+resource:
+  attributes:
+    - name: service.name
+      value: "skopos-e2e-server"
+    - name: service.namespace
+      value: "skopos-e2e"
+
+propagator: {}
+
+tracer_provider:
+  sampler:
+    always_on: {}
+  processors:
+    - batch:
+        exporter:
+          otlp_grpc:
+            endpoint: http://collector:4317
+            tls:
+              insecure: true
+        schedule_delay: 2000
+        max_export_batch_size: 512
+        max_queue_size: 2048
+
+meter_provider:
+  readers:
+    - periodic:
+        exporter:
+          otlp_grpc:
+            endpoint: http://collector:4317
+            tls:
+              insecure: true
+        interval: 5000
+
+extensions:
+  obi:
+    version: "2.0"
+    capture:
+      policy:
+        default_action: exclude
+        match_order: first_match_wins
+        poll_interval: 2s
+        min_process_age: 0s
+      rules:
+        - action: include
+          name: include-e2e-server
+          match:
+            process:
+              open_ports: "8080"
+              exe_path_glob:
+                - "*/e2e-server"
+              containers_only: true
+      instrumentation:
+        http:
+          enabled:
+            traces: true
+            metrics: true
+      metrics:
+        features:
+          - application
+      safety:
+        enforce_system_capabilities: true
+      engine:
+        propagation:
+          context_propagation: disabled
+    enrich:
+      enrichers:
+        kubernetes:
+          mode: disabled
+    daemon:
+      logging:
+        format: json
