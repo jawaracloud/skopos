@@ -1,0 +1,6 @@
+global:
+  scrape_interval: 1h
+
+# The three-way harness loads historical samples from OpenMetrics into the
+# Prometheus TSDB. There is intentionally nothing to scrape.
+scrape_configs: []

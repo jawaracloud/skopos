@@ -1,0 +1,63 @@
+# Three-way differential stack: ClickHouse, cerberus, and a real Prometheus.
+#
+# Skopos itself is built and started by run.sh so the harness always tests the
+# working tree under review. Images are pinned by tag and digest. The
+# Prometheus TSDB is populated by run.sh from the same metrics fixture that is
+# seeded into ClickHouse.
+name: skopos-cerberus-compat
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
+    environment:
+      CLICKHOUSE_USER: ${CERBERUS_COMPAT_CH_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CERBERUS_COMPAT_CH_PASSWORD:-skopos-cerberus}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:${CERBERUS_COMPAT_CH_HTTP_PORT:-18131}:8123"
+      - "127.0.0.1:${CERBERUS_COMPAT_CH_NATIVE_PORT:-19031}:9000"
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$${CLICKHOUSE_USER}\" --password \"$${CLICKHOUSE_PASSWORD}\" --query 'SELECT 1'"]
+      interval: 3s
+      timeout: 5s
+      retries: 40
+      start_period: 10s
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+  cerberus:
+    image: ghcr.io/tsouza/cerberus:v1.23.1@sha256:e5ced00b1ee85c371295147ed0bce9caa4a5c5554443ee8aabc329d5351dc4a5
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    environment:
+      CERBERUS_HTTP_ADDR: ":8080"
+      CERBERUS_CH_ADDR: "clickhouse:9000"
+      CERBERUS_CH_DATABASE: "otel"
+      CERBERUS_CH_USERNAME: ${CERBERUS_COMPAT_CH_USER:-default}
+      CERBERUS_CH_PASSWORD: ${CERBERUS_COMPAT_CH_PASSWORD:-skopos-cerberus}
+      CERBERUS_CH_DIAL_TIMEOUT: "10s"
+      # Keep the reference on the exact 24.8-safe SQL path rather than the
+      # native timeSeries*ToGrid path: the three gateways must differ only in
+      # their implementation, not in an optional ClickHouse fast path.
+      CERBERUS_CH_OPTIMIZATIONS: "auto"
+      CERBERUS_LOG_LEVEL: "info"
+    ports:
+      - "127.0.0.1:${CERBERUS_COMPAT_CERBERUS_PORT:-18092}:8080"
+
+  prometheus:
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    user: "0"
+    volumes:
+      - prometheus-data:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - "--storage.tsdb.path=/prometheus"
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=20000d"
+    ports:
+      - "127.0.0.1:${CERBERUS_COMPAT_PROMETHEUS_PORT:-18093}:9090"
+
+volumes:
+  clickhouse-data:
+  prometheus-data:

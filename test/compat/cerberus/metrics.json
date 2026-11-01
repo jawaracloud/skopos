@@ -1,0 +1,74 @@
+{
+  "description": "Deterministic metric fixture for the three-way PromQL comparison. The same samples are written to the standard OTel ClickHouse exporter tables and to a real Prometheus TSDB (via OpenMetrics), so the reference, cerberus, and Skopos read identical data. Times are seconds relative to baseTimeUnix; series are generated from the formulas below.",
+  "baseTimeUnix": 1793491200,
+  "instantTime": 1793491500,
+  "gauges": [
+    {
+      "name": "demo_temperature_celsius",
+      "service": "checkout",
+      "attributes": {"sensor": "a"},
+      "start": 0,
+      "end": 300,
+      "step": 15,
+      "valueBase": 20,
+      "valueStep": 1
+    },
+    {
+      "name": "demo_temperature_celsius",
+      "service": "cart",
+      "attributes": {"sensor": "b"},
+      "start": 0,
+      "end": 300,
+      "step": 15,
+      "valueBase": 30,
+      "valueStep": 0.4
+    }
+  ],
+  "sums": [
+    {
+      "name": "demo_requests_total",
+      "service": "checkout",
+      "attributes": {"code": "200"},
+      "start": 0,
+      "end": 300,
+      "step": 15,
+      "valueBase": 0,
+      "valueStep": 10,
+      "monotonic": true
+    }
+  ],
+  "histograms": [
+    {
+      "name": "demo_latency_seconds",
+      "service": "checkout",
+      "attributes": {"route": "/checkout"},
+      "start": 0,
+      "end": 300,
+      "step": 30,
+      "countBase": 10,
+      "countStep": 10,
+      "bounds": [0.1, 0.5, 1.0],
+      "cumulativeFractions": [0.2, 0.5, 1.0],
+      "sumFactor": 0.6,
+      "min": 0.01,
+      "max": 2.0
+    }
+  ],
+  "summaries": [
+    {
+      "name": "demo_rpc_duration_seconds",
+      "service": "checkout",
+      "attributes": {"rpc": "Get"},
+      "start": 0,
+      "end": 300,
+      "step": 30,
+      "countBase": 10,
+      "countStep": 10,
+      "sumFactor": 0.2,
+      "quantiles": [
+        {"quantile": 0.5, "value": 0.15},
+        {"quantile": 0.9, "value": 0.35}
+      ]
+    }
+  ]
+}

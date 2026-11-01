@@ -87,6 +87,19 @@ jobs:
       - name: Loki differential
         run: test/compat/loki/run.sh verify
 
+  cerberus:
+    name: cerberus three-way differential
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Prometheus + cerberus + Skopos
+        run: test/compat/cerberus/run.sh
+
   helm:
     name: Helm lint and render
     runs-on: ubuntu-24.04
