@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"sort"
 	"strconv"
@@ -74,6 +75,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/context/coverage", a.handleCoverage)
 	mux.HandleFunc("GET /api/v1/context/suggestions", a.handleSuggestions)
 	mux.HandleFunc("GET /.well-known/skopos.json", a.handleWellKnown)
+	mux.HandleFunc("GET /metrics", a.handleMetrics)
 }
 
 type metricResponse struct {
@@ -109,6 +111,12 @@ type observedResponse struct {
 	Description string  `json:"description,omitempty"`
 	Source      string  `json:"source"`
 	Confidence  float64 `json:"confidence"`
+}
+
+type observedSignal struct {
+	Source     string  `json:"source"`
+	Confidence float64 `json:"confidence"`
+	Count      uint64  `json:"count,omitempty"`
 }
 
 type listItem struct {
@@ -356,7 +364,7 @@ type logResponse struct {
 	Severity    []string          `json:"severity,omitempty"`
 	Flags       []string          `json:"flags,omitempty"`
 	Sources     []string          `json:"sources,omitempty"`
-	Observed    *observedResponse `json:"observed,omitempty"`
+	Observed    *observedSignal   `json:"observed,omitempty"`
 	Query       string            `json:"query,omitempty"`
 	Runbook     string            `json:"runbook,omitempty"`
 	Fields      map[string]string `json:"fields,omitempty"`
@@ -365,21 +373,22 @@ type logResponse struct {
 }
 
 type traceResponse struct {
-	Schema       string       `json:"schema"`
-	ID           string       `json:"id"`
-	Known        bool         `json:"known"`
-	Service      string       `json:"service,omitempty"`
-	Operation    string       `json:"operation,omitempty"`
-	Kind         string       `json:"kind,omitempty"`
-	CriticalPath bool         `json:"critical_path,omitempty"`
-	Description  string       `json:"description,omitempty"`
-	Flags        []string     `json:"flags,omitempty"`
-	Sources      []string     `json:"sources,omitempty"`
-	Query        string       `json:"query,omitempty"`
-	Runbook      string       `json:"runbook,omitempty"`
-	Downstream   []string     `json:"downstream,omitempty"`
-	Caveats      []string     `json:"caveats,omitempty"`
-	Provenance   []provenance `json:"provenance,omitempty"`
+	Schema       string          `json:"schema"`
+	ID           string          `json:"id"`
+	Known        bool            `json:"known"`
+	Service      string          `json:"service,omitempty"`
+	Operation    string          `json:"operation,omitempty"`
+	Kind         string          `json:"kind,omitempty"`
+	CriticalPath bool            `json:"critical_path,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	Flags        []string        `json:"flags,omitempty"`
+	Sources      []string        `json:"sources,omitempty"`
+	Observed     *observedSignal `json:"observed,omitempty"`
+	Query        string          `json:"query,omitempty"`
+	Runbook      string          `json:"runbook,omitempty"`
+	Downstream   []string        `json:"downstream,omitempty"`
+	Caveats      []string        `json:"caveats,omitempty"`
+	Provenance   []provenance    `json:"provenance,omitempty"`
 }
 
 type logListItem struct {
@@ -387,7 +396,9 @@ type logListItem struct {
 	Service  string   `json:"service,omitempty"`
 	Event    string   `json:"event,omitempty"`
 	Severity []string `json:"severity,omitempty"`
+	Count    uint64   `json:"count,omitempty"`
 	Flags    []string `json:"flags,omitempty"`
+	Observed bool     `json:"observed,omitempty"`
 }
 
 type traceListItem struct {
@@ -396,7 +407,9 @@ type traceListItem struct {
 	Operation    string   `json:"operation,omitempty"`
 	Kind         string   `json:"kind,omitempty"`
 	CriticalPath bool     `json:"critical_path,omitempty"`
+	Count        uint64   `json:"count,omitempty"`
 	Flags        []string `json:"flags,omitempty"`
+	Observed     bool     `json:"observed,omitempty"`
 }
 
 type logListResponse struct {
@@ -405,6 +418,7 @@ type logListResponse struct {
 	Items   []logListItem `json:"items"`
 	Total   int           `json:"total"`
 	HasMore bool          `json:"has_more,omitempty"`
+	Flags   []string      `json:"flags,omitempty"`
 }
 
 type traceListResponse struct {
@@ -413,6 +427,7 @@ type traceListResponse struct {
 	Items   []traceListItem `json:"items"`
 	Total   int             `json:"total"`
 	HasMore bool            `json:"has_more,omitempty"`
+	Flags   []string        `json:"flags,omitempty"`
 }
 
 type signalCoverage struct {
@@ -476,11 +491,46 @@ func (a *API) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ids := make([]string, 0, len(a.Catalog.Logs))
+	includeObserved, err := parseOptionalBool(r.URL.Query().Get("observed"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid observed")
+		return
+	}
+	itemsByID := make(map[string]logListItem)
 	for id, log := range a.Catalog.Logs {
 		if service != "" && log.Service != service {
 			continue
 		}
+		itemsByID[id] = logListItem{
+			ID: id, Service: log.Service, Event: log.Event,
+			Severity: append([]string(nil), log.Severity...),
+			Flags:    append([]string(nil), log.Flags...),
+		}
+	}
+	var flags []string
+	if includeObserved && a.SignalObserver != nil {
+		observed, err := a.SignalObserver.ListObservedLogs(r.Context())
+		if err != nil {
+			flags = append(flags, "observed_logs_unavailable")
+		} else {
+			for _, log := range observed {
+				if service != "" && log.Service != service {
+					continue
+				}
+				id := observedLogID(log)
+				if _, exists := itemsByID[id]; exists {
+					continue
+				}
+				itemsByID[id] = logListItem{
+					ID: id, Service: log.Service, Event: log.Event,
+					Count: log.Count, Observed: true,
+					Flags: []string{"missing_context", "observed_only"},
+				}
+			}
+		}
+	}
+	ids := make([]string, 0, len(itemsByID))
+	for id := range itemsByID {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -490,16 +540,11 @@ func (a *API) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]logListItem, 0, len(ids))
 	for _, id := range ids {
-		log := a.Catalog.Logs[id]
-		items = append(items, logListItem{
-			ID: id, Service: log.Service, Event: log.Event,
-			Severity: append([]string(nil), log.Severity...),
-			Flags:    append([]string(nil), log.Flags...),
-		})
+		items = append(items, itemsByID[id])
 	}
 	writeJSON(w, r, a.Catalog.Version, logListResponse{
 		Schema: SchemaVersion, Version: a.Catalog.Version,
-		Items: items, Total: total, HasMore: total > len(items),
+		Items: items, Total: total, HasMore: total > len(items), Flags: flags,
 	})
 }
 
@@ -517,6 +562,23 @@ func (a *API) handleLog(w http.ResponseWriter, r *http.Request) {
 	}
 	log, known := a.Catalog.Logs[id]
 	if !known {
+		if a.SignalObserver != nil && strings.HasPrefix(id, "obslog_") {
+			if observed, err := a.SignalObserver.ListObservedLogs(r.Context()); err == nil {
+				for _, item := range observed {
+					if observedLogID(item) == id {
+						writeJSON(w, r, a.Catalog.Version, logResponse{
+							Schema: SchemaVersion, ID: id, Known: false,
+							Service: item.Service, Event: item.Event,
+							Severity: observedSeverity(item.Severity),
+							Flags:    []string{"missing_context", "observed_only"},
+							Sources:  []string{"clickhouse"},
+							Observed: &observedSignal{Source: "clickhouse", Confidence: 0.4, Count: item.Count},
+						})
+						return
+					}
+				}
+			}
+		}
 		writeJSON(w, r, a.Catalog.Version, logResponse{
 			Schema: SchemaVersion, ID: id, Known: false,
 			Flags: []string{"missing_context"},
@@ -564,11 +626,46 @@ func (a *API) handleTraces(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	ids := make([]string, 0, len(a.Catalog.Traces))
+	includeObserved, err := parseOptionalBool(r.URL.Query().Get("observed"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid observed")
+		return
+	}
+	itemsByID := make(map[string]traceListItem)
 	for id, trace := range a.Catalog.Traces {
 		if service != "" && trace.Service != service {
 			continue
 		}
+		itemsByID[id] = traceListItem{
+			ID: id, Service: trace.Service, Operation: trace.Operation,
+			Kind: trace.Kind, CriticalPath: trace.CriticalPath,
+			Flags: append([]string(nil), trace.Flags...),
+		}
+	}
+	var flags []string
+	if includeObserved && a.SignalObserver != nil {
+		observed, err := a.SignalObserver.ListObservedTraces(r.Context())
+		if err != nil {
+			flags = append(flags, "observed_traces_unavailable")
+		} else {
+			for _, trace := range observed {
+				if service != "" && trace.Service != service {
+					continue
+				}
+				id := observedTraceID(trace)
+				if _, exists := itemsByID[id]; exists {
+					continue
+				}
+				itemsByID[id] = traceListItem{
+					ID: id, Service: trace.Service, Operation: trace.Operation,
+					Kind: trace.Kind, Count: trace.Count, Observed: true,
+					Flags: []string{"missing_context", "observed_only"},
+				}
+			}
+		}
+	}
+	ids := make([]string, 0, len(itemsByID))
+	for id := range itemsByID {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -578,16 +675,11 @@ func (a *API) handleTraces(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]traceListItem, 0, len(ids))
 	for _, id := range ids {
-		trace := a.Catalog.Traces[id]
-		items = append(items, traceListItem{
-			ID: id, Service: trace.Service, Operation: trace.Operation,
-			Kind: trace.Kind, CriticalPath: trace.CriticalPath,
-			Flags: append([]string(nil), trace.Flags...),
-		})
+		items = append(items, itemsByID[id])
 	}
 	writeJSON(w, r, a.Catalog.Version, traceListResponse{
 		Schema: SchemaVersion, Version: a.Catalog.Version,
-		Items: items, Total: total, HasMore: total > len(items),
+		Items: items, Total: total, HasMore: total > len(items), Flags: flags,
 	})
 }
 
@@ -605,6 +697,22 @@ func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
 	}
 	trace, known := a.Catalog.Traces[id]
 	if !known {
+		if a.SignalObserver != nil && strings.HasPrefix(id, "obstrace_") {
+			if observed, err := a.SignalObserver.ListObservedTraces(r.Context()); err == nil {
+				for _, item := range observed {
+					if observedTraceID(item) == id {
+						writeJSON(w, r, a.Catalog.Version, traceResponse{
+							Schema: SchemaVersion, ID: id, Known: false,
+							Service: item.Service, Operation: item.Operation, Kind: item.Kind,
+							Flags:    []string{"missing_context", "observed_only"},
+							Sources:  []string{"clickhouse"},
+							Observed: &observedSignal{Source: "clickhouse", Confidence: 0.4, Count: item.Count},
+						})
+						return
+					}
+				}
+			}
+		}
 		writeJSON(w, r, a.Catalog.Version, traceResponse{
 			Schema: SchemaVersion, ID: id, Known: false,
 			Flags: []string{"missing_context"},
@@ -786,6 +894,66 @@ func parseOptionalBool(raw string) (bool, error) {
 	return strconv.ParseBool(raw)
 }
 
+func (a *API) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	minCoverage := 0.8
+	var b strings.Builder
+	b.WriteString("# HELP skopos_context_documented Number of documented catalog entries.\n")
+	b.WriteString("# TYPE skopos_context_documented gauge\n")
+	fmt.Fprintf(&b, "skopos_context_documented{signal=\"metrics\"} %d\n", len(a.Catalog.Metrics))
+	fmt.Fprintf(&b, "skopos_context_documented{signal=\"services\"} %d\n", len(a.Catalog.Services))
+	fmt.Fprintf(&b, "skopos_context_documented{signal=\"logs\"} %d\n", len(a.Catalog.Logs))
+	fmt.Fprintf(&b, "skopos_context_documented{signal=\"traces\"} %d\n", len(a.Catalog.Traces))
+
+	if a.Observer != nil {
+		if observed, err := a.Observer.ListObserved(r.Context()); err == nil {
+			fmt.Fprintf(&b, "skopos_context_observed{signal=\"metrics\"} %d\n", len(observed))
+			coverage := 0.0
+			if len(observed) > 0 {
+				coverage = float64(len(a.Catalog.Metrics)) / float64(len(observed))
+				if coverage > 1 {
+					coverage = 1
+				}
+			}
+			fmt.Fprintf(&b, "skopos_context_coverage_ratio{signal=\"metrics\"} %g\n", coverage)
+			alert := 0
+			if len(observed) > 0 && coverage < minCoverage {
+				alert = 1
+			}
+			fmt.Fprintf(&b, "skopos_context_low_coverage{signal=\"metrics\"} %d\n", alert)
+		} else {
+			b.WriteString("skopos_context_observed_available{signal=\"metrics\"} 0\n")
+		}
+	}
+	if a.SignalObserver != nil {
+		logs, logsErr := a.SignalObserver.ListObservedLogs(r.Context())
+		traces, tracesErr := a.SignalObserver.ListObservedTraces(r.Context())
+		if logsErr == nil {
+			fmt.Fprintf(&b, "skopos_context_observed{signal=\"logs\"} %d\n", len(logs))
+			alert := 0
+			if len(logs) > 0 && float64(len(a.Catalog.Logs))/float64(len(logs)) < minCoverage {
+				alert = 1
+			}
+			fmt.Fprintf(&b, "skopos_context_low_coverage{signal=\"logs\"} %d\n", alert)
+		} else {
+			b.WriteString("skopos_context_observed_available{signal=\"logs\"} 0\n")
+		}
+		if tracesErr == nil {
+			fmt.Fprintf(&b, "skopos_context_observed{signal=\"traces\"} %d\n", len(traces))
+			alert := 0
+			if len(traces) > 0 && float64(len(a.Catalog.Traces))/float64(len(traces)) < minCoverage {
+				alert = 1
+			}
+			fmt.Fprintf(&b, "skopos_context_low_coverage{signal=\"traces\"} %d\n", alert)
+		} else {
+			b.WriteString("skopos_context_observed_available{signal=\"traces\"} 0\n")
+		}
+	}
+	w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, b.String())
+}
+
 func (a *API) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, a.Catalog.Version, map[string]any{
 		"schema":        "skopos.well-known/v1",
@@ -798,6 +966,23 @@ func (a *API) handleWellKnown(w http.ResponseWriter, r *http.Request) {
 			"prometheus": "/api/v1", "loki": "/loki/api/v1", "tempo": "/api",
 		},
 	})
+}
+
+func observedLogID(item ObservedLog) string {
+	sum := sha256.Sum256([]byte(item.Service + "\x00" + item.Severity + "\x00" + item.Event))
+	return "obslog_" + hex.EncodeToString(sum[:8])
+}
+
+func observedTraceID(item ObservedTrace) string {
+	sum := sha256.Sum256([]byte(item.Service + "\x00" + item.Operation + "\x00" + item.Kind))
+	return "obstrace_" + hex.EncodeToString(sum[:8])
+}
+
+func observedSeverity(value string) []string {
+	if value == "" {
+		return nil
+	}
+	return []string{value}
 }
 
 func parseDetail(raw string) (detailLevel, error) {

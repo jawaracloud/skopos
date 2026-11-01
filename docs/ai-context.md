@@ -52,7 +52,9 @@ GET /api/v1/context/logs/{id}?detail=minimal
 GET /api/v1/context/traces?service=checkout&limit=20
 GET /api/v1/context/traces/{id}?detail=minimal
 GET /api/v1/context/coverage
+GET /api/v1/context/suggestions
 GET /.well-known/skopos.json
+GET /metrics
 ```
 
 All routes are protected by Basic auth when auth is enabled, like the query
@@ -172,9 +174,12 @@ rules:
 }
 ```
 
-`GET /api/v1/context/logs` and `/traces` return only compact list items.
+`GET /api/v1/context/logs` and `/traces` return compact list items. Add
+`?observed=true` to include observed ClickHouse streams/operations with stable
+`obslog_`/`obstrace_` IDs. Their detail response stays `known:false` and carries
+an observed block; it never invents a catalog description or owner.
 `detail=standard` adds the query, runbook, fields/downstream; `detail=full`
-adds caveats and provenance.
+adds caveats and provenance for catalog entries.
 
 `GET /api/v1/context/coverage` returns documented counts. Add
 `?observed=true` to include observed metric counts and a documented/observed
@@ -188,6 +193,10 @@ counts. When the gateway can query ClickHouse, `observed.logs` and
 catalog entry. It proposes observed type/unit/description only, sets
 `approval: "human_required"`, and never writes the catalog. A human must review
 and commit the catalog change.
+
+`GET /metrics` exposes Prometheus text gauges for documented/observed counts,
+coverage ratio, and low-coverage alerts. Scrape it with the same Basic auth as
+the context API if auth is enabled.
 
 ### Service response
 
@@ -387,8 +396,7 @@ signal card, then a query.
 ## Remaining beyond Phase 4
 
 - Resumability for interrupted SSE streams.
-- Observed log/trace context cards (coverage counts for observed logs/traces
-  are already included).
 - A reviewed write/apply path for suggestions (the API currently only proposes
   them; it never writes the catalog).
-- External delivery of coverage alerts to monitoring.
+- More detailed observed log/trace cards (current observed detail is
+  service/event/operation/kind plus count, not a full query/runbook card).

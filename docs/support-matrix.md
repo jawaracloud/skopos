@@ -27,7 +27,8 @@ the receiver component and its maturity first.
 | Loki `/loki/api/v1/*` | Implemented alpha | [logql-support.md](logql-support.md) |
 | Health `/healthz`, `/readyz`, `/version` | Implemented | — |
 | Context `/api/v1/context/*` | Implemented alpha (optional catalog; metrics, services, logs, traces, coverage/alerts, discovery, observed metadata, suggestions) | [ai-context.md](ai-context.md) |
-| MCP server | Implemented alpha (`cmd/skopos-mcp`, stdio and HTTP POST) | [ai-context.md](ai-context.md#mcp-server) |
+| Context metrics `/metrics` | Implemented alpha (Prometheus text gauges; auth applies) | [ai-context.md](ai-context.md) |
+| MCP server | Implemented alpha (`cmd/skopos-mcp`, stdio and HTTP sessions/SSE) | [ai-context.md](ai-context.md#mcp-server) |
 
 The gateway exposes all three APIs on one public port. The Grafana datasource
 example points all three datasource types at that service.
