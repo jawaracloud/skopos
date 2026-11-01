@@ -1,0 +1,20 @@
+Skopos {{ .Chart.AppVersion }} is installed.
+
+The query APIs are NOT implemented yet in this alpha. The gateway currently
+serves only /healthz, /readyz, and /version. Do not point production Grafana
+instances at it.
+
+Check the data plane:
+
+  kubectl -n {{ .Release.Namespace }} get pods
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "skopos.gateway.fullname" . }} 8080:{{ .Values.gateway.service.port }}
+  curl -s http://127.0.0.1:8080/healthz
+  curl -s http://127.0.0.1:8080/readyz
+
+If the init job failed:
+
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "skopos.clickhouseInit.fullname" . }}
+
+Security warning: v0.1 has no built-in authentication. Keep the gateway on a
+ClusterIP Service, restrict the NetworkPolicy to your Grafana namespace, and do
+not expose it to the internet. See SECURITY.md and docs/install.md.

@@ -1,0 +1,32 @@
+[
+  {
+    "name": "service_label",
+    "type": "String",
+    "value": "service.name"
+  },
+  {
+    "name": "__start",
+    "type": "DateTime64(9)",
+    "value": "2026-11-01T00:00:00Z"
+  },
+  {
+    "name": "__end",
+    "type": "DateTime64(9)",
+    "value": "2026-11-01T01:00:00Z"
+  },
+  {
+    "name": "metric",
+    "type": "String",
+    "value": "http_requests_total"
+  },
+  {
+    "name": "threshold",
+    "type": "Float64",
+    "value": 0.5
+  },
+  {
+    "name": "__limit",
+    "type": "UInt64",
+    "value": 1000
+  }
+]

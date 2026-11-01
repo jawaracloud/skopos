@@ -1,0 +1,21 @@
+apiVersion: v2
+name: skopos
+description: Alpha OSS observability stack using OBI, OpenTelemetry Collector, ClickHouse, and a Prometheus/Loki/Tempo-compatible query gateway.
+type: application
+version: 0.1.0-alpha.1
+appVersion: "0.1.0-alpha.1"
+kubeVersion: ">=1.27.0-0"
+home: https://github.com/obi-wrapper/skopos
+sources:
+  - https://github.com/obi-wrapper/skopos
+keywords:
+  - observability
+  - opentelemetry
+  - ebpf
+  - clickhouse
+  - prometheus
+  - loki
+  - tempo
+annotations:
+  category: Observability
+  skopos.io/alpha: "true"

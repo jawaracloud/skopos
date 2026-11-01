@@ -1,0 +1,90 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: "1.27.x"
+  GOVULNCHECK_VERSION: v1.1.4
+  HELM_VERSION: v3.22.1
+  CLICKHOUSE_IMAGE: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
+
+jobs:
+  go:
+    name: Go build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Verify module checksums
+        run: go mod verify
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Unit tests
+        run: go test ./...
+      - name: Race detector
+        run: go test -race ./...
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+      - name: govulncheck
+        run: "$(go env GOPATH)/bin/govulncheck ./..."
+
+  integration:
+    name: ClickHouse integration
+    runs-on: ubuntu-latest
+    services:
+      clickhouse:
+        image: ${{ env.CLICKHOUSE_IMAGE }}
+        ports:
+          - 8123:8123
+          - 9000:9000
+        env:
+          CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+        options: >-
+          --health-cmd "clickhouse-client --query 'SELECT 1'"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+      - name: Integration tests
+        env:
+          CLICKHOUSE_URL: http://127.0.0.1:8123
+        run: go test -tags=integration ./...
+
+  helm:
+    name: Helm lint and render
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Lint
+        run: helm lint deploy/helm/skopos
+      - name: Render default values
+        run: helm template skopos deploy/helm/skopos --namespace observability > /tmp/skopos-default.yaml
+      - name: Render overrides
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set clickhouse.database=otel_test \
+            --set clickhouse.persistence.storageClass=standard \
+            --set gateway.replicaCount=2 > /tmp/skopos-overrides.yaml
+      - name: Render with digest-pinned gateway image
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+            > /tmp/skopos-digest.yaml

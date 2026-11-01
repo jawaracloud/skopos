@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skopos.clickhouse.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  type: {{ .Values.clickhouse.service.type }}
+  selector:
+    {{- include "skopos.componentLabels" (dict "root" . "component" "clickhouse") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.clickhouse.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+    - name: native
+      port: {{ .Values.clickhouse.service.nativePort }}
+      targetPort: native
+      protocol: TCP

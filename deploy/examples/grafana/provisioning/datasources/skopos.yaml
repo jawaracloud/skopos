@@ -1,0 +1,37 @@
+# Example Grafana datasource provisioning for Skopos.
+#
+# Replace the namespace/service if you installed the chart with a different
+# release name or namespace. The query endpoints are planned for M3–M5; until
+# then these datasources will return errors.
+apiVersion: 1
+
+datasources:
+  - name: Skopos Prometheus
+    type: prometheus
+    uid: skopos-prometheus
+    access: proxy
+    url: http://skopos-gateway.observability.svc:8080
+    isDefault: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s
+
+  - name: Skopos Loki
+    type: loki
+    uid: skopos-loki
+    access: proxy
+    url: http://skopos-gateway.observability.svc:8080
+    jsonData:
+      maxLines: 1000
+
+  - name: Skopos Tempo
+    type: tempo
+    uid: skopos-tempo
+    access: proxy
+    url: http://skopos-gateway.observability.svc:8080
+    jsonData:
+      httpMethod: GET
+      tracesToLogsV2:
+        datasourceUid: skopos-loki
+      serviceMap:
+        datasourceUid: skopos-prometheus

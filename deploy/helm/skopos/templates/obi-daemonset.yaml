@@ -1,0 +1,94 @@
+{{- if .Values.obi.enabled }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "skopos.obi.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+spec:
+  selector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "obi") | nindent 6 }}
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: obi
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/obi-configmap.yaml") . | sha256sum | quote }}
+    spec:
+      hostPID: {{ .Values.obi.hostPID }}
+      serviceAccountName: {{ include "skopos.obi.serviceAccountName" . }}
+      terminationGracePeriodSeconds: 30
+      {{- with .Values.obi.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: obi
+          image: {{ include "skopos.image" (dict "image" .Values.obi.image) | quote }}
+          imagePullPolicy: {{ .Values.obi.image.pullPolicy }}
+          terminationMessagePolicy: FallbackToLogsOnError
+          securityContext:
+            runAsUser: {{ .Values.obi.securityContext.runAsUser }}
+            runAsGroup: {{ .Values.obi.securityContext.runAsGroup }}
+            readOnlyRootFilesystem: {{ .Values.obi.securityContext.readOnlyRootFilesystem }}
+            allowPrivilegeEscalation: {{ .Values.obi.securityContext.allowPrivilegeEscalation }}
+            capabilities:
+              drop:
+                - ALL
+              add:
+                {{- $caps := .Values.obi.securityContext.capabilities.add }}
+                {{- if .Values.obi.contextPropagation }}
+                {{- $caps = append $caps "NET_ADMIN" }}
+                {{- $caps = append $caps "SYS_ADMIN" }}
+                {{- end }}
+                {{- range (uniq $caps) }}
+                - {{ . }}
+                {{- end }}
+          env:
+            - name: OTEL_EBPF_CONFIG_PATH
+              value: /config/obi-config.yml
+            - name: OTEL_EBPF_KUBE_METADATA_ENABLE
+              value: "true"
+            - name: KUBE_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            {{- with .Values.obi.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.obi.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
+            - name: var-run-obi
+              mountPath: /var/run/obi
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
+            {{- if .Values.obi.mountTracefs }}
+            - name: tracefs
+              mountPath: /sys/kernel/tracing
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "skopos.obi.fullname" . }}-config
+        - name: var-run-obi
+          emptyDir: {}
+        - name: cgroup
+          hostPath:
+            path: {{ .Values.obi.cgroupHostPath }}
+            type: Directory
+        {{- if .Values.obi.mountTracefs }}
+        - name: tracefs
+          hostPath:
+            path: {{ .Values.obi.tracefsHostPath }}
+            type: Directory
+        {{- end }}
+{{- end }}

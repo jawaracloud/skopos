@@ -1,0 +1,17 @@
+[
+  {
+    "name": "__start",
+    "type": "DateTime64(9)",
+    "value": "2026-11-01T00:00:00Z"
+  },
+  {
+    "name": "__end",
+    "type": "DateTime64(9)",
+    "value": "2026-11-01T01:00:00Z"
+  },
+  {
+    "name": "__limit",
+    "type": "UInt64",
+    "value": 100
+  }
+]

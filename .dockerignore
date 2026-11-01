@@ -1,0 +1,10 @@
+.git
+.github
+bin
+dist
+*.test
+*.out
+coverage.out
+deploy/helm/skopos
+docs
+test

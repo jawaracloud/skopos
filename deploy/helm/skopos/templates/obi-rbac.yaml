@@ -1,0 +1,48 @@
+{{- if .Values.obi.enabled }}
+{{- if .Values.obi.serviceAccount.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "skopos.obi.serviceAccountName" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+  {{- with .Values.obi.serviceAccount.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- if .Values.obi.rbac.create }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "skopos.obi.clusterRoleName" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "skopos.obi.clusterRoleName" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "skopos.obi.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "skopos.obi.clusterRoleName" . }}
+{{- end }}
+{{- end }}

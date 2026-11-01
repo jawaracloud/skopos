@@ -1,0 +1,29 @@
+{{- if .Values.collector.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skopos.collector.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  type: {{ .Values.collector.service.type }}
+  selector:
+    {{- include "skopos.componentLabels" (dict "root" . "component" "collector") | nindent 4 }}
+  ports:
+    - name: otlp-grpc
+      port: {{ .Values.collector.service.grpcPort }}
+      targetPort: otlp-grpc
+      protocol: TCP
+      appProtocol: grpc
+    - name: otlp-http
+      port: {{ .Values.collector.service.httpPort }}
+      targetPort: otlp-http
+      protocol: TCP
+      appProtocol: http
+    - name: health
+      port: {{ .Values.collector.service.healthPort }}
+      targetPort: health
+      protocol: TCP
+      appProtocol: http
+{{- end }}

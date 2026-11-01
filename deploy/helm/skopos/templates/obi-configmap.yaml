@@ -1,0 +1,95 @@
+{{- if .Values.obi.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skopos.obi.fullname" . }}-config
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+data:
+  obi-config.yml: |
+    file_format: "1.0"
+    log_level: {{ .Values.obi.logLevel | quote }}
+    resource: {}
+    propagator: {}
+
+    tracer_provider:
+      processors:
+        - batch:
+            exporter:
+              otlp_grpc:
+                endpoint: http://{{ include "skopos.collector.host" . }}:{{ .Values.collector.service.grpcPort }}
+                tls:
+                  insecure: true
+            schedule_delay: 5000
+            max_export_batch_size: 512
+            max_queue_size: 2048
+
+    meter_provider:
+      readers:
+        - periodic:
+            exporter:
+              otlp_grpc:
+                endpoint: http://{{ include "skopos.collector.host" . }}:{{ .Values.collector.service.grpcPort }}
+                tls:
+                  insecure: true
+            interval: 30000
+
+    extensions:
+      obi:
+        version: "2.0"
+        capture:
+          policy:
+            default_action: include
+            match_order: first_match_wins
+            poll_interval: 5s
+            min_process_age: 5s
+          rules:
+            - action: exclude
+              name: exclude-obi-and-collectors
+              match:
+                process:
+                  exe_path_glob:
+                    - "{*/obi,obi,*otelcol,*otelcol-contrib,*otelcol-contrib[!/]*}"
+            - action: exclude
+              name: exclude-skopos-components
+              match:
+                process:
+                  exe_path_glob:
+                    - "*/clickhouse"
+                    - "*/skopos-gateway"
+                    - "*/gateway"
+            {{- if .Values.obi.discovery.excludeSystemNamespaces }}
+            - action: exclude
+              name: exclude-system-namespaces
+              match:
+                kubernetes:
+                  namespace_glob:
+                    - kube-system
+                    - kube-node-lease
+                    - local-path-storage
+                    - cert-manager
+                    - monitoring
+            {{- end }}
+            {{- with .Values.obi.discovery.extraRules }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          metrics:
+            features:
+              - application
+          safety:
+            enforce_system_capabilities: true
+          engine:
+            propagation:
+              context_propagation: {{ if .Values.obi.contextPropagation }}all{{ else }}disabled{{ end }}
+        enrich:
+          enrichers:
+            kubernetes:
+              mode: autodetect
+              {{- if .Values.obi.clusterName }}
+              cluster_name: {{ .Values.obi.clusterName | quote }}
+              {{- end }}
+        daemon:
+          logging:
+            format: json
+{{- end }}

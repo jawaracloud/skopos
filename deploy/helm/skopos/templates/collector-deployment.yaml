@@ -1,0 +1,81 @@
+{{- if .Values.collector.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skopos.collector.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "collector") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: collector
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/collector-configmap.yaml") . | sha256sum | quote }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.collector.podSecurityContext | nindent 8 }}
+      containers:
+        - name: collector
+          image: {{ include "skopos.image" (dict "image" .Values.collector.image) | quote }}
+          imagePullPolicy: {{ .Values.collector.image.pullPolicy }}
+          args:
+            - --config=/etc/otelcol-contrib/config.yaml
+          securityContext:
+            {{- toYaml .Values.collector.securityContext | nindent 12 }}
+          ports:
+            - name: otlp-grpc
+              containerPort: {{ .Values.collector.service.grpcPort }}
+              protocol: TCP
+            - name: otlp-http
+              containerPort: {{ .Values.collector.service.httpPort }}
+              protocol: TCP
+            - name: health
+              containerPort: {{ .Values.collector.service.healthPort }}
+              protocol: TCP
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.secretName" . }}
+                  key: admin-password
+            {{- with .Values.collector.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 6
+          resources:
+            {{- toYaml .Values.collector.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otelcol-contrib
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "skopos.collector.fullname" . }}-config
+        - name: tmp
+          emptyDir: {}
+{{- end }}

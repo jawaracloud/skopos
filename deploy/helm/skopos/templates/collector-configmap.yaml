@@ -1,0 +1,85 @@
+{{- if .Values.collector.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skopos.collector.fullname" . }}-config
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+
+    exporters:
+      clickhouse:
+        endpoint: tcp://{{ include "skopos.clickhouse.host" . }}:{{ .Values.clickhouse.service.nativePort }}
+        database: {{ .Values.clickhouse.database }}
+        username: {{ .Values.clickhouse.auth.adminUser }}
+        password: ${env:CLICKHOUSE_PASSWORD}
+        create_schema: false
+        async_insert: true
+        ttl: 0s
+        logs_table_name: {{ .Values.clickhouse.tables.logs }}
+        traces_table_name: {{ .Values.clickhouse.tables.traces }}
+        metrics_tables:
+          gauge:
+            name: {{ .Values.clickhouse.tables.metricsGauge }}
+          sum:
+            name: {{ .Values.clickhouse.tables.metricsSum }}
+          summary:
+            name: {{ .Values.clickhouse.tables.metricsSummary }}
+          histogram:
+            name: {{ .Values.clickhouse.tables.metricsHistogram }}
+          exponential_histogram:
+            name: {{ .Values.clickhouse.tables.metricsExponentialHistogram }}
+        timeout: 5s
+        sending_queue:
+          enabled: true
+          num_consumers: {{ .Values.collector.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.collector.sendingQueue.queueSize }}
+          sizer: items
+          batch:
+            min_size: {{ .Values.collector.sendingQueue.batchMinSize }}
+            flush_timeout: {{ .Values.collector.sendingQueue.batchFlushTimeout }}
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          max_elapsed_time: 300s
+
+    service:
+      extensions:
+        - health_check
+      pipelines:
+        traces:
+          receivers:
+            - otlp
+          exporters:
+            - clickhouse
+        metrics:
+          receivers:
+            - otlp
+          exporters:
+            - clickhouse
+        logs:
+          receivers:
+            - otlp
+          exporters:
+            - clickhouse
+      telemetry:
+        logs:
+          level: info
+          encoding: json
+        metrics:
+          level: basic
+{{- end }}

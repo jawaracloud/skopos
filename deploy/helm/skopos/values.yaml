@@ -1,0 +1,245 @@
+nameOverride: ""
+fullnameOverride: ""
+
+# ClickHouse single-node. HA and replication are out of scope for v0.1.
+clickhouse:
+  image:
+    repository: clickhouse/clickhouse-server
+    tag: 26.8.36.3
+    digest: sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
+    pullPolicy: IfNotPresent
+  database: otel
+  tables:
+    traces: otel_traces
+    logs: otel_logs
+    metricsGauge: otel_metrics_gauge
+    metricsSum: otel_metrics_sum
+    metricsHistogram: otel_metrics_histogram
+    metricsExponentialHistogram: otel_metrics_exponential_histogram
+    metricsSummary: otel_metrics_summary
+  ttl:
+    tracesDays: 7
+    logsDays: 7
+    metricsDays: 30
+  persistence:
+    size: 50Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  service:
+    type: ClusterIP
+    httpPort: 8123
+    nativePort: 9000
+  auth:
+    # If set, this Secret must contain admin-password and gateway-password.
+    existingSecret: ""
+    adminUser: default
+    gatewayUser: skopos_gateway
+  limits:
+    maxExecutionTimeSeconds: 30
+    maxMemoryUsageBytes: 1073741824
+    maxRowsToRead: 10000000
+    maxResultRows: 100000
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
+  podSecurityContext:
+    runAsUser: 101
+    runAsGroup: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    # The official image writes its generated user config into /etc on first
+    # boot. Keep the root filesystem writable in alpha; see docs/install.md.
+    readOnlyRootFilesystem: false
+  initJob:
+    backoffLimit: 6
+    activeDeadlineSeconds: 600
+  extraEnv: []
+
+collector:
+  enabled: true
+  image:
+    repository: otel/opentelemetry-collector-contrib
+    tag: 0.164.0
+    digest: sha256:340c9ca6a36617084c6661bdc4f0fe92b7cda5a805d61673ec8db375fddc522b
+    pullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    grpcPort: 4317
+    httpPort: 4318
+    healthPort: 13133
+  sendingQueue:
+    numConsumers: 10
+    queueSize: 50000
+    batchMinSize: 5000
+    batchFlushTimeout: 5s
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    runAsGroup: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  extraEnv: []
+
+obi:
+  enabled: true
+  image:
+    repository: otel/ebpf-instrument
+    tag: v1.0.0
+    digest: sha256:a68d70e934260f72540f157ccf4fb4adfa38f11de060d7d905696dad6a3fca02
+    pullPolicy: IfNotPresent
+  serviceAccount:
+    create: true
+    name: ""
+  rbac:
+    create: true
+  hostPID: true
+  tolerations:
+    - operator: Exists
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  securityContext:
+    runAsUser: 0
+    runAsGroup: 0
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+      add:
+        - BPF
+        - CHECKPOINT_RESTORE
+        - DAC_READ_SEARCH
+        - NET_RAW
+        - PERFMON
+        - SYS_PTRACE
+        # Required on kernels older than 5.11 to raise locked memory limits.
+        - SYS_RESOURCE
+  # Enabling trace-context propagation adds NET_ADMIN and SYS_ADMIN. See
+  # OBI's security documentation before enabling it.
+  contextPropagation: false
+  clusterName: ""
+  logLevel: info
+  discovery:
+    excludeSystemNamespaces: true
+    # Extra OBI v2 capture rules, appended after the built-in exclusions.
+    # Example:
+    # extraRules:
+    #   - action: include
+    #     match:
+    #       kubernetes:
+    #         namespace_glob: ["shop"]
+    extraRules: []
+  env: []
+  mountTracefs: true
+  tracefsHostPath: /sys/kernel/tracing
+  cgroupHostPath: /sys/fs/cgroup
+
+gateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: ghcr.io/obi-wrapper/skopos-gateway
+    tag: 0.1.0-alpha.1
+    # Release values must set a digest. Local development may leave it empty.
+    digest: ""
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8080
+  config:
+    maxExecutionTime: 30s
+    maxMemoryUsage: 1073741824
+    maxRowsToRead: 10000000
+    maxResultRows: 100000
+    maxResponseBytes: 67108864
+    readinessTimeout: 2s
+    maxRequestBytes: 1048576
+    logLevel: info
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  probes:
+    liveness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 2
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 3
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+networkPolicy:
+  enabled: true
+  gateway:
+    # NetworkPolicyPeer list. The default allows any namespace to reach the
+    # gateway on its service port. Tighten this to your Grafana namespace.
+    allowFrom:
+      - namespaceSelector: {}
+  clickhouse:
+    allowCollector: true
+    allowGateway: true
+    allowInitJob: true
+  collector:
+    allowObi: true
+  obi:
+    denyIngress: true
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+commonLabels: {}

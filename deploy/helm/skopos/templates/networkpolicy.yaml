@@ -1,0 +1,114 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "skopos.clickhouse.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "clickhouse") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if .Values.networkPolicy.clickhouse.allowCollector }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "skopos.componentLabels" (dict "root" . "component" "collector") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.clickhouse.service.nativePort }}
+    {{- end }}
+    {{- if .Values.networkPolicy.clickhouse.allowGateway }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "skopos.componentLabels" (dict "root" . "component" "gateway") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.clickhouse.service.httpPort }}
+    {{- end }}
+    {{- if .Values.networkPolicy.clickhouse.allowInitJob }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "skopos.componentLabels" (dict "root" . "component" "clickhouse-init") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.clickhouse.service.nativePort }}
+    {{- end }}
+---
+{{- if .Values.collector.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "skopos.collector.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: collector
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "collector") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    {{- if and .Values.obi.enabled .Values.networkPolicy.collector.allowObi }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "skopos.componentLabels" (dict "root" . "component" "obi") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.collector.service.grpcPort }}
+        - protocol: TCP
+          port: {{ .Values.collector.service.httpPort }}
+    {{- end }}
+---
+{{- end }}
+{{- if .Values.gateway.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "skopos.gateway.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "gateway") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  {{- with .Values.networkPolicy.gateway.allowFrom }}
+  ingress:
+    - from:
+        {{- toYaml . | nindent 8 }}
+      ports:
+        - protocol: TCP
+          port: {{ $.Values.gateway.service.port }}
+  {{- else }}
+  ingress: []
+  {{- end }}
+---
+{{- end }}
+{{- if and .Values.obi.enabled .Values.networkPolicy.obi.denyIngress }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "skopos.obi.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: obi
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "obi") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress: []
+{{- end }}
+{{- end }}

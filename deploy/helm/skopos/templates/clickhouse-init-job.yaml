@@ -1,0 +1,103 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "skopos.clickhouseInit.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse-init
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "10"
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: {{ .Values.clickhouse.initJob.backoffLimit }}
+  activeDeadlineSeconds: {{ .Values.clickhouse.initJob.activeDeadlineSeconds }}
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: clickhouse-init
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: init
+          image: {{ include "skopos.image" (dict "image" .Values.clickhouse.image) | quote }}
+          imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - /bin/sh
+            - -ec
+          args:
+            - |
+              export HOME=/tmp
+              cli() {
+                clickhouse-client --host "$CLICKHOUSE_HOST" --port 9000 \
+                  --user "$CLICKHOUSE_ADMIN_USER" --password "$CLICKHOUSE_ADMIN_PASSWORD" "$@"
+              }
+
+              i=0
+              until cli --query "SELECT 1" >/dev/null 2>&1; do
+                i=$((i + 1))
+                if [ "$i" -ge 150 ]; then
+                  echo "ClickHouse did not become ready" >&2
+                  exit 1
+                fi
+                echo "waiting for ClickHouse"
+                sleep 2
+              done
+
+              cli --multiquery < /schema/schema.sql
+
+              cli --query "CREATE USER IF NOT EXISTS ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY '${SKOPOS_GATEWAY_PASSWORD}' SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
+              cli --query "ALTER USER ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY '${SKOPOS_GATEWAY_PASSWORD}' SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
+              cli --query "GRANT SELECT ON \`${SKOPOS_DATABASE}\`.* TO ${SKOPOS_GATEWAY_USER}"
+          env:
+            - name: CLICKHOUSE_HOST
+              value: {{ include "skopos.clickhouse.host" . | quote }}
+            - name: CLICKHOUSE_ADMIN_USER
+              value: {{ .Values.clickhouse.auth.adminUser | quote }}
+            - name: CLICKHOUSE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.secretName" . }}
+                  key: admin-password
+            - name: SKOPOS_DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: SKOPOS_GATEWAY_USER
+              value: {{ .Values.clickhouse.auth.gatewayUser | quote }}
+            - name: SKOPOS_GATEWAY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.secretName" . }}
+                  key: gateway-password
+            - name: SKOPOS_MAX_EXECUTION_TIME
+              value: {{ .Values.clickhouse.limits.maxExecutionTimeSeconds | int64 | quote }}
+            - name: SKOPOS_MAX_MEMORY_USAGE
+              value: {{ .Values.clickhouse.limits.maxMemoryUsageBytes | int64 | quote }}
+            - name: SKOPOS_MAX_ROWS_TO_READ
+              value: {{ .Values.clickhouse.limits.maxRowsToRead | int64 | quote }}
+            - name: SKOPOS_MAX_RESULT_ROWS
+              value: {{ .Values.clickhouse.limits.maxResultRows | int64 | quote }}
+          volumeMounts:
+            - name: schema
+              mountPath: /schema
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: schema
+          configMap:
+            name: {{ include "skopos.clickhouse.fullname" . }}-schema
+        - name: tmp
+          emptyDir: {}
