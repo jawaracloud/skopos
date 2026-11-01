@@ -6,6 +6,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jawaracloud/skopos/internal/auth"
 )
 
 const (
@@ -32,20 +36,24 @@ var supportedProtocolVersions = map[string]struct{}{
 
 // Config configures the MCP server.
 type Config struct {
-	GatewayURL string
-	Username   string
-	Password   string
-	MaxBytes   int64
-	Timeout    time.Duration
-	Version    string
-	HTTPClient *http.Client
+	GatewayURL   string
+	Username     string
+	Password     string
+	MaxBytes     int64
+	Timeout      time.Duration
+	Version      string
+	HTTPClient   *http.Client
+	HTTPAddr     string
+	HTTPUsername string
+	HTTPPassword string
 }
 
 // Server is a stdio MCP server.
 type Server struct {
-	gateway *Gateway
-	version string
-	timeout time.Duration
+	gateway  *Gateway
+	version  string
+	timeout  time.Duration
+	httpAuth *auth.Basic
 }
 
 // NewServer validates cfg and constructs a server.
@@ -67,13 +75,25 @@ func NewServer(cfg Config) (*Server, error) {
 	if client == nil {
 		client = &http.Client{Timeout: cfg.Timeout}
 	}
+	var httpAuth *auth.Basic
+	if cfg.HTTPUsername != "" || cfg.HTTPPassword != "" {
+		if cfg.HTTPUsername == "" || cfg.HTTPPassword == "" {
+			return nil, errors.New("both MCP HTTP username and password are required")
+		}
+		var err error
+		httpAuth, err = auth.New(cfg.HTTPUsername, cfg.HTTPPassword)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return &Server{
 		gateway: &Gateway{
 			base: u, username: cfg.Username, password: cfg.Password,
 			maxBytes: cfg.MaxBytes, client: client,
 		},
-		version: cfg.Version,
-		timeout: cfg.Timeout,
+		version:  cfg.Version,
+		timeout:  cfg.Timeout,
+		httpAuth: httpAuth,
 	}, nil
 }
 
@@ -463,6 +483,78 @@ func truncate(value string, max int) string {
 	return value[:max] + "..."
 }
 
+// HTTPHandler returns the remote Streamable-HTTP-style MCP endpoint. It
+// accepts one JSON-RPC request per POST /mcp; JSON is the default response and
+// text/event-stream is returned when the client asks for it.
+func (s *Server) HTTPHandler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
+	})
+	mux.HandleFunc("POST /mcp", s.handleHTTPMCP)
+	mux.HandleFunc("GET /mcp", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
+		http.Error(w, "streaming GET is not supported; POST JSON-RPC to /mcp", http.StatusMethodNotAllowed)
+	})
+	mux.HandleFunc("DELETE /mcp", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	var handler http.Handler = mux
+	if s.httpAuth != nil {
+		// Health checks stay open for probes; MCP itself is protected.
+		handler = s.httpAuth.Wrap(handler, "/healthz")
+	}
+	return handler
+}
+
+func (s *Server) handleHTTPMCP(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+		http.Error(w, "cannot read request", http.StatusBadRequest)
+		return
+	}
+	var request rpcRequest
+	if json.Unmarshal(body, &request) == nil && request.Method == "initialize" {
+		w.Header().Set("Mcp-Session-Id", newSessionID())
+	}
+	response := s.handleLine(body)
+	if response == nil {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+	encoded, err := json.Marshal(response)
+	if err != nil {
+		http.Error(w, "cannot encode response", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	if strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", encoded)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(encoded)
+	_, _ = w.Write([]byte("\n"))
+}
+
+func newSessionID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return ""
+	}
+	return hex.EncodeToString(b[:])
+}
+
 // ConfigFromEnv reads the MCP server configuration.
 func ConfigFromEnv() Config {
 	maxBytes := int64(defaultMaxBytes)
@@ -472,10 +564,13 @@ func ConfigFromEnv() Config {
 		}
 	}
 	return Config{
-		GatewayURL: envOr("SKOPOS_GATEWAY_URL", defaultGatewayURL),
-		Username:   os.Getenv("SKOPOS_AUTH_USERNAME"),
-		Password:   os.Getenv("SKOPOS_AUTH_PASSWORD"),
-		MaxBytes:   maxBytes,
+		GatewayURL:   envOr("SKOPOS_GATEWAY_URL", defaultGatewayURL),
+		Username:     os.Getenv("SKOPOS_AUTH_USERNAME"),
+		Password:     os.Getenv("SKOPOS_AUTH_PASSWORD"),
+		MaxBytes:     maxBytes,
+		HTTPAddr:     os.Getenv("SKOPOS_MCP_HTTP_ADDR"),
+		HTTPUsername: os.Getenv("SKOPOS_MCP_HTTP_USERNAME"),
+		HTTPPassword: os.Getenv("SKOPOS_MCP_HTTP_PASSWORD"),
 	}
 }
 

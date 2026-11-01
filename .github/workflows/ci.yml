@@ -165,6 +165,7 @@ jobs:
             --set-file context.catalog=deploy/examples/context/catalog.json \
             > /tmp/skopos-context.yaml
           grep -q 'SKOPOS_CONTEXT_FILE' /tmp/skopos-context.yaml
+          grep -q 'SKOPOS_CONTEXT_OBSERVED' /tmp/skopos-context.yaml
           grep -q 'name: skopos-context' /tmp/skopos-context.yaml
           grep -q 'catalog.json' /tmp/skopos-context.yaml
       - name: Render tiered storage and backup

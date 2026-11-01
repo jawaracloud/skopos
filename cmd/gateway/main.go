@@ -117,6 +117,9 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 	if err != nil {
 		return fmt.Errorf("prometheus storage: %w", err)
 	}
+	if cfg.ContextObserved {
+		contextAPI.WithObserver(newContextObserver(fetcher, logger))
+	}
 	promEngine := prom.NewEngine(fetcher)
 	promEngine.MaxSamples = int(cfg.MaxScanRows)
 	promAPI := prom.NewAPI(promEngine, fetcher, version)
@@ -170,6 +173,9 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 		"auth_enabled", cfg.AuthEnabled,
 		"context_metrics", len(contextCatalog.Metrics),
 		"context_services", len(contextCatalog.Services),
+		"context_logs", len(contextCatalog.Logs),
+		"context_traces", len(contextCatalog.Traces),
+		"context_observed", cfg.ContextObserved,
 	}
 	switch cfg.Mode {
 	case config.ModeWorker:

@@ -15,11 +15,15 @@
       "additionalProperties": false,
       "required": [
         "enabled",
+        "observed",
         "existingConfigMap",
         "catalog"
       ],
       "properties": {
         "enabled": {
+          "type": "boolean"
+        },
+        "observed": {
           "type": "boolean"
         },
         "existingConfigMap": {

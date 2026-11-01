@@ -46,8 +46,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.AuthEnabled || cfg.AuthUsername != "" || cfg.AuthPassword != "" {
 		t.Errorf("auth defaults = %#v", cfg)
 	}
-	if cfg.ContextFile != "" {
-		t.Errorf("ContextFile = %q", cfg.ContextFile)
+	if cfg.ContextFile != "" || !cfg.ContextObserved {
+		t.Errorf("context defaults = %q/%v", cfg.ContextFile, cfg.ContextObserved)
 	}
 }
 
@@ -74,6 +74,7 @@ func TestOverrides(t *testing.T) {
 		"SKOPOS_AUTH_USERNAME":                 "viewer",
 		"SKOPOS_AUTH_PASSWORD":                 "secret",
 		"SKOPOS_CONTEXT_FILE":                  "/etc/skopos/context/catalog.json",
+		"SKOPOS_CONTEXT_OBSERVED":              "false",
 	}))
 	if err != nil {
 		t.Fatalf("FromLookup: %v", err)
@@ -101,8 +102,8 @@ func TestOverrides(t *testing.T) {
 	if !cfg.AuthEnabled || cfg.AuthUsername != "viewer" || cfg.AuthPassword != "secret" {
 		t.Fatalf("auth = %#v", cfg)
 	}
-	if cfg.ContextFile != "/etc/skopos/context/catalog.json" {
-		t.Fatalf("ContextFile = %q", cfg.ContextFile)
+	if cfg.ContextFile != "/etc/skopos/context/catalog.json" || cfg.ContextObserved {
+		t.Fatalf("context = %q/%v", cfg.ContextFile, cfg.ContextObserved)
 	}
 }
 

@@ -47,7 +47,8 @@ var allowedRoles = map[string]struct{}{
 // API serves the compact context endpoints. It is intentionally separate from
 // the Prometheus/Loki/Tempo query handlers.
 type API struct {
-	Catalog *Catalog
+	Catalog  *Catalog
+	Observer Observer
 }
 
 // NewAPI returns a context API. A nil catalog becomes an empty catalog.
@@ -86,6 +87,7 @@ type metricResponse struct {
 	Description string            `json:"description,omitempty"`
 	Flags       []string          `json:"flags,omitempty"`
 	Sources     []string          `json:"sources,omitempty"`
+	Observed    *observedResponse `json:"observed,omitempty"`
 	Query       string            `json:"query,omitempty"`
 	Runbook     string            `json:"runbook,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty"`
@@ -99,13 +101,22 @@ type provenance struct {
 	Confidence float64 `json:"confidence"`
 }
 
+type observedResponse struct {
+	Type        string  `json:"type,omitempty"`
+	Unit        string  `json:"unit,omitempty"`
+	Description string  `json:"description,omitempty"`
+	Source      string  `json:"source"`
+	Confidence  float64 `json:"confidence"`
+}
+
 type listItem struct {
-	Name    string   `json:"name"`
-	Type    string   `json:"type,omitempty"`
-	Unit    string   `json:"unit,omitempty"`
-	Role    string   `json:"role,omitempty"`
-	Service string   `json:"service,omitempty"`
-	Flags   []string `json:"flags,omitempty"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type,omitempty"`
+	Unit     string   `json:"unit,omitempty"`
+	Role     string   `json:"role,omitempty"`
+	Service  string   `json:"service,omitempty"`
+	Flags    []string `json:"flags,omitempty"`
+	Observed bool     `json:"observed,omitempty"`
 }
 
 type listResponse struct {
@@ -156,12 +167,26 @@ func (a *API) handleMetric(w http.ResponseWriter, r *http.Request) {
 	}
 	metric, known := a.Catalog.Metrics[name]
 	if !known {
-		writeJSON(w, r, a.Catalog.Version, metricResponse{
+		out := metricResponse{
 			Schema: SchemaVersion,
 			Name:   name,
 			Known:  false,
 			Flags:  []string{"missing_context"},
-		})
+		}
+		if a.Observer != nil {
+			observed, ok, err := a.Observer.Observe(r.Context(), name)
+			if err != nil {
+				out.Flags = append(out.Flags, "observed_unavailable")
+			} else if ok {
+				out.Observed = &observedResponse{
+					Type: observed.Type, Unit: observed.Unit, Description: observed.Description,
+					Source: "clickhouse", Confidence: 0.4,
+				}
+				out.Sources = []string{"clickhouse"}
+				out.Flags = append(out.Flags, "observed_only")
+			}
+		}
+		writeJSON(w, r, a.Catalog.Version, out)
 		return
 	}
 	out := metricResponse{
@@ -223,7 +248,12 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	names := make([]string, 0, len(a.Catalog.Metrics))
+	includeObserved, err := parseOptionalBool(r.URL.Query().Get("observed"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid observed")
+		return
+	}
+	itemsByName := make(map[string]listItem)
 	for name, metric := range a.Catalog.Metrics {
 		if service != "" && metric.Service != service {
 			continue
@@ -231,6 +261,29 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 		if role != "" && metric.Role != role {
 			continue
 		}
+		itemsByName[name] = listItem{
+			Name: name, Type: metric.Type, Unit: metric.Unit,
+			Role: metric.Role, Service: metric.Service,
+			Flags: append([]string(nil), metric.Flags...),
+		}
+	}
+	if includeObserved && a.Observer != nil && service == "" && role == "" {
+		observed, err := a.Observer.ListObserved(r.Context())
+		if err == nil {
+			for _, item := range observed {
+				if _, ok := itemsByName[item.Name]; ok {
+					continue
+				}
+				itemsByName[item.Name] = listItem{
+					Name: item.Name, Type: item.Type, Unit: item.Unit,
+					Observed: true,
+					Flags:    []string{"missing_context", "observed_only"},
+				}
+			}
+		}
+	}
+	names := make([]string, 0, len(itemsByName))
+	for name := range itemsByName {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -240,12 +293,7 @@ func (a *API) handleList(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]listItem, 0, len(names))
 	for _, name := range names {
-		metric := a.Catalog.Metrics[name]
-		items = append(items, listItem{
-			Name: name, Type: metric.Type, Unit: metric.Unit,
-			Role: metric.Role, Service: metric.Service,
-			Flags: append([]string(nil), metric.Flags...),
-		})
+		items = append(items, itemsByName[name])
 	}
 	writeJSON(w, r, a.Catalog.Version, listResponse{
 		Schema: SchemaVersion, Version: a.Catalog.Version,
@@ -306,6 +354,7 @@ type logResponse struct {
 	Severity    []string          `json:"severity,omitempty"`
 	Flags       []string          `json:"flags,omitempty"`
 	Sources     []string          `json:"sources,omitempty"`
+	Observed    *observedResponse `json:"observed,omitempty"`
 	Query       string            `json:"query,omitempty"`
 	Runbook     string            `json:"runbook,omitempty"`
 	Fields      map[string]string `json:"fields,omitempty"`
@@ -369,12 +418,19 @@ type signalCoverage struct {
 }
 
 type coverageResponse struct {
-	Schema   string         `json:"schema"`
-	Version  string         `json:"version"`
-	Metrics  signalCoverage `json:"metrics"`
-	Services signalCoverage `json:"services"`
-	Logs     signalCoverage `json:"logs"`
-	Traces   signalCoverage `json:"traces"`
+	Schema   string            `json:"schema"`
+	Version  string            `json:"version"`
+	Metrics  signalCoverage    `json:"metrics"`
+	Services signalCoverage    `json:"services"`
+	Logs     signalCoverage    `json:"logs"`
+	Traces   signalCoverage    `json:"traces"`
+	Observed *observedCoverage `json:"observed,omitempty"`
+}
+
+type observedCoverage struct {
+	Metrics  int      `json:"metrics"`
+	Coverage float64  `json:"coverage"`
+	Flags    []string `json:"flags,omitempty"`
 }
 
 func (a *API) handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -554,13 +610,41 @@ func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) handleCoverage(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, r, a.Catalog.Version, coverageResponse{
+	out := coverageResponse{
 		Schema: SchemaVersion, Version: a.Catalog.Version,
 		Metrics:  signalCoverage{Documented: len(a.Catalog.Metrics)},
 		Services: signalCoverage{Documented: len(a.Catalog.Services)},
 		Logs:     signalCoverage{Documented: len(a.Catalog.Logs)},
 		Traces:   signalCoverage{Documented: len(a.Catalog.Traces)},
-	})
+	}
+	includeObserved, err := parseOptionalBool(r.URL.Query().Get("observed"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid observed")
+		return
+	}
+	if includeObserved && a.Observer != nil {
+		observed, err := a.Observer.ListObserved(r.Context())
+		if err != nil {
+			out.Observed = &observedCoverage{Flags: []string{"observed_unavailable"}}
+		} else {
+			coverage := 0.0
+			if len(observed) > 0 {
+				coverage = float64(len(a.Catalog.Metrics)) / float64(len(observed))
+				if coverage > 1 {
+					coverage = 1
+				}
+			}
+			out.Observed = &observedCoverage{Metrics: len(observed), Coverage: coverage}
+		}
+	}
+	writeJSON(w, r, a.Catalog.Version, out)
+}
+
+func parseOptionalBool(raw string) (bool, error) {
+	if raw == "" {
+		return false, nil
+	}
+	return strconv.ParseBool(raw)
 }
 
 func (a *API) handleWellKnown(w http.ResponseWriter, r *http.Request) {
