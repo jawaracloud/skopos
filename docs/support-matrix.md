@@ -73,7 +73,7 @@ with the beta test matrix.
   The literal three-way zero is blocked by cerberus v1.23.1; the harness fails
   on any new or fixed cerberus gap.
 - The full Prometheus compliance tester and the complete Loki benchmark corpus
-  remain beta gates.
+  remain beta gates; see [beta-gates.md](beta-gates.md).
 - The OBI e2e and release signing/publishing are manual because they need
   privileged eBPF or project credentials; normal CI covers build, unit,
   integration, fuzz, Helm, PromQL oracle, Tempo/Loki references, and the

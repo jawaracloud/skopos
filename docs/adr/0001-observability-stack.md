@@ -164,4 +164,5 @@ Cerberus v1.23.1 has 39 presentation/semantic gaps of its own; they are
 baseline-pinned and fail only in strict mode, so the literal "three-way zero"
 gate is blocked by the reference, not by Skopos. The full Prometheus
 compliance tester and the complete Loki benchmark corpus remain open beta
-gates; the current corpora are a representative subset.
+gates; the current corpora are a representative subset. See
+`docs/beta-gates.md` for the evidence and next steps.

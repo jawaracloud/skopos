@@ -166,6 +166,7 @@ the internet. See [SECURITY.md](SECURITY.md) and [docs/install.md](docs/install.
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
 - [Installation and operations](docs/install.md)
 - [Support matrix](docs/support-matrix.md)
+- [Beta gate status](docs/beta-gates.md)
 - [PromQL support](docs/promql-support.md)
 - [TraceQL support](docs/traceql-support.md)
 - [LogQL support](docs/logql-support.md)
