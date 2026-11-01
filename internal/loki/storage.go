@@ -31,7 +31,10 @@ func NewClickHouseFetcher(client *chclient.Client, schema *plan.Schema, names pl
 	if _, ok := schema.Table(names.Logs); !ok {
 		return nil, fmt.Errorf("loki: schema has no table %q", names.Logs)
 	}
-	emitter, err := sqlgen.New(schema, sqlgen.Limits{MaxLimit: maxRows, MaxRange: 7 * 24 * time.Hour})
+	// The API enforces a 7-day query range. A metric query additionally fetches
+	// one range-selector lookback before its first step and may be step-aligned,
+	// so the storage emitter allows a wider hard ceiling than the API.
+	emitter, err := sqlgen.New(schema, sqlgen.Limits{MaxLimit: maxRows, MaxRange: 30 * 24 * time.Hour})
 	if err != nil {
 		return nil, err
 	}
