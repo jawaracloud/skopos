@@ -1,0 +1,226 @@
+{
+  "description": "Deterministic LogQL corpus for the Skopos Loki head. Expected values were produced by grafana/loki:3.5.7 from the entries below, with Loki's synthesized detected_level label removed because Skopos does not synthesize it.",
+  "reference": {
+    "image": "grafana/loki:3.5.7",
+    "command": "test/compat/loki/run.sh verify",
+    "normalization": "drop detected_level and stats; sort streams, series, and samples"
+  },
+  "entries": [
+    {
+      "timestamp": "2026-11-01T00:00:30Z",
+      "body": "{\"level\":\"error\",\"status\":500,\"msg\":\"request timeout\"}",
+      "labels": {"service_name": "checkout", "severity_text": "ERROR"}
+    },
+    {
+      "timestamp": "2026-11-01T00:03:30Z",
+      "body": "{\"level\":\"error\",\"status\":503,\"msg\":\"still broken\"}",
+      "labels": {"service_name": "checkout", "severity_text": "ERROR"}
+    },
+    {
+      "timestamp": "2026-11-01T00:01:00Z",
+      "body": "{\"level\":\"info\",\"status\":200,\"msg\":\"ok\"}",
+      "labels": {"service_name": "checkout", "severity_text": "INFO"}
+    },
+    {
+      "timestamp": "2026-11-01T00:05:30Z",
+      "body": "{\"level\":\"info\",\"status\":200,\"msg\":\"ok again\"}",
+      "labels": {"service_name": "checkout", "severity_text": "INFO"}
+    },
+    {
+      "timestamp": "2026-11-01T00:01:30Z",
+      "body": "{\"level\":\"error\",\"status\":501,\"msg\":\"cart down\"}",
+      "labels": {"service_name": "cart", "severity_text": "ERROR"}
+    },
+    {
+      "timestamp": "2026-11-01T00:02:00Z",
+      "body": "level=info status=200 msg=\"item added\"",
+      "labels": {"service_name": "inventory", "severity_text": "INFO"}
+    }
+  ],
+  "cases": [
+    {
+      "name": "json_label_filter_and_numeric_comparison",
+      "kind": "log",
+      "query": "{service_name=\"checkout\"} | json | level=\"error\" | status >= 500",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "expected_logs": [
+        {
+          "timestamp": "2026-11-01T00:00:30Z",
+          "labels": {"level": "error", "status": "500", "msg": "request timeout"}
+        },
+        {
+          "timestamp": "2026-11-01T00:03:30Z",
+          "labels": {"level": "error", "status": "503", "msg": "still broken"}
+        }
+      ]
+    },
+    {
+      "name": "logfmt_filter",
+      "kind": "log",
+      "query": "{service_name=\"inventory\"} | logfmt | status=200",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "expected_logs": [
+        {
+          "timestamp": "2026-11-01T00:02:00Z",
+          "labels": {"level": "info", "status": "200", "msg": "item added"}
+        }
+      ]
+    },
+    {
+      "name": "missing_label_equality_matches_empty",
+      "kind": "log",
+      "query": "{service_name=\"inventory\"} | logfmt | missing=\"\"",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "expected_logs": [
+        {"timestamp": "2026-11-01T00:02:00Z"}
+      ]
+    },
+    {
+      "name": "stream_regex_is_anchored",
+      "kind": "log",
+      "query": "{service_name=~\"check\"}",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "expected_logs": []
+    },
+    {
+      "name": "line_filter",
+      "kind": "log",
+      "query": "{service_name=\"checkout\"} |= \"timeout\"",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "expected_logs": [
+        {"timestamp": "2026-11-01T00:00:30Z"}
+      ]
+    },
+    {
+      "name": "count_over_time",
+      "kind": "metric",
+      "query": "count_over_time({service_name=\"checkout\"}[5m])",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:05:00Z",
+      "step": "60s",
+      "expected": [
+        {
+          "metric": {"service_name": "checkout", "severity_text": "ERROR"},
+          "values": [
+            [1793491260, "1"],
+            [1793491320, "1"],
+            [1793491380, "1"],
+            [1793491440, "2"],
+            [1793491500, "2"]
+          ]
+        },
+        {
+          "metric": {"service_name": "checkout", "severity_text": "INFO"},
+          "values": [
+            [1793491260, "1"],
+            [1793491320, "1"],
+            [1793491380, "1"],
+            [1793491440, "1"],
+            [1793491500, "1"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "rate",
+      "kind": "metric",
+      "query": "rate({service_name=\"checkout\", severity_text=\"ERROR\"}[5m])",
+      "start": "2026-11-01T00:01:00Z",
+      "end": "2026-11-01T00:06:00Z",
+      "step": "5m",
+      "expected": [
+        {
+          "metric": {"service_name": "checkout", "severity_text": "ERROR"},
+          "values": [
+            [1793491500, "0.006666666666666667"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sum_by_stream_label",
+      "kind": "metric",
+      "query": "sum by (severity_text) (count_over_time({service_name=\"checkout\"}[5m]))",
+      "start": "2026-11-01T00:00:00Z",
+      "end": "2026-11-01T00:05:00Z",
+      "step": "60s",
+      "expected": [
+        {
+          "metric": {"severity_text": "ERROR"},
+          "values": [
+            [1793491260, "1"],
+            [1793491320, "1"],
+            [1793491380, "1"],
+            [1793491440, "2"],
+            [1793491500, "2"]
+          ]
+        },
+        {
+          "metric": {"severity_text": "INFO"},
+          "values": [
+            [1793491260, "1"],
+            [1793491320, "1"],
+            [1793491380, "1"],
+            [1793491440, "1"],
+            [1793491500, "1"]
+          ]
+        }
+      ]
+    },
+    {
+      "name": "sum_by_parsed_label",
+      "kind": "metric",
+      "query": "sum by (level) (count_over_time({service_name=\"checkout\"} | json [5m]))",
+      "start": "2026-11-01T00:05:00Z",
+      "end": "2026-11-01T00:05:00Z",
+      "step": "60s",
+      "expected": [
+        {
+          "metric": {"level": "error"},
+          "values": [[1793491500, "2"]]
+        },
+        {
+          "metric": {"level": "info"},
+          "values": [[1793491500, "1"]]
+        }
+      ]
+    },
+    {
+      "name": "sum_by_rate",
+      "kind": "metric",
+      "query": "sum by (severity_text) (rate({service_name=\"checkout\"}[5m]))",
+      "start": "2026-11-01T00:05:00Z",
+      "end": "2026-11-01T00:05:00Z",
+      "step": "60s",
+      "expected": [
+        {
+          "metric": {"severity_text": "ERROR"},
+          "values": [[1793491500, "0.006666666666666667"]]
+        },
+        {
+          "metric": {"severity_text": "INFO"},
+          "values": [[1793491500, "0.0033333333333333335"]]
+        }
+      ]
+    },
+    {
+      "name": "sum_rate",
+      "kind": "metric",
+      "query": "sum(rate({service_name=\"checkout\"}[5m]))",
+      "start": "2026-11-01T00:05:00Z",
+      "end": "2026-11-01T00:05:00Z",
+      "step": "60s",
+      "expected": [
+        {
+          "metric": {},
+          "values": [[1793491500, "0.01"]]
+        }
+      ]
+    }
+  ]
+}

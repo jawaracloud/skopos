@@ -3,6 +3,7 @@ package loki
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"time"
 )
 
+const defaultMaxSamples = 100_000
+
 // LogFetcher is the storage surface used by the Loki API.
 type LogFetcher interface {
 	FetchRange(ctx context.Context, start, end time.Time) ([]LogEntry, error)
@@ -20,15 +23,16 @@ type LogFetcher interface {
 
 // API serves the Loki-compatible endpoints used by Grafana.
 type API struct {
-	Fetcher  LogFetcher
-	Version  string
-	MaxRange time.Duration
-	Now      func() time.Time
+	Fetcher    LogFetcher
+	Version    string
+	MaxRange   time.Duration
+	MaxSamples int
+	Now        func() time.Time
 }
 
 // NewAPI returns a Loki-compatible API.
 func NewAPI(fetcher LogFetcher, version string) *API {
-	return &API{Fetcher: fetcher, Version: version, MaxRange: 7 * 24 * time.Hour, Now: time.Now}
+	return &API{Fetcher: fetcher, Version: version, MaxRange: 7 * 24 * time.Hour, MaxSamples: defaultMaxSamples, Now: time.Now}
 }
 
 // Register attaches the Loki routes to mux.
@@ -67,6 +71,10 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if query.Metric != nil {
+		a.handleMetricQuery(w, r, query)
+		return
+	}
 	start, end, err := a.queryTimeRange(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -81,9 +89,12 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 	direction := strings.ToLower(r.FormValue("direction"))
 	filtered := make([]LogEntry, 0, len(entries))
 	for _, entry := range entries {
-		if query.Match(entry) {
-			filtered = append(filtered, entry)
+		labels, ok := query.Evaluate(entry)
+		if !ok {
+			continue
 		}
+		entry.Labels = labels
+		filtered = append(filtered, entry)
 	}
 	sort.Slice(filtered, func(i, j int) bool {
 		if direction == "forward" {
@@ -125,6 +136,176 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (a *API) handleMetricQuery(w http.ResponseWriter, r *http.Request, query Query) {
+	rangeQuery := strings.HasSuffix(r.URL.Path, "/query_range")
+	if !rangeQuery {
+		at, err := parseLokiTime(r.FormValue("time"), a.now())
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "time: "+err.Error())
+			return
+		}
+		series, err := a.evaluateMetric(r.Context(), query, []time.Time{at})
+		if err != nil {
+			writeMetricError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "success",
+			"data": map[string]any{
+				"resultType": "vector",
+				"result":     vectorData(series),
+				"stats":      map[string]any{},
+			},
+		})
+		return
+	}
+
+	start, end, err := a.timeRange(r)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	step, err := parseMetricStep(r.FormValue("step"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	points, err := evaluationPoints(start, end, step, a.maxSamples())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	series, err := a.evaluateMetric(r.Context(), query, points)
+	if err != nil {
+		writeMetricError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "success",
+		"data": map[string]any{
+			"resultType": "matrix",
+			"result":     matrixData(series),
+			"stats":      map[string]any{},
+		},
+	})
+}
+
+func (a *API) maxSamples() int {
+	if a.MaxSamples > 0 {
+		return a.MaxSamples
+	}
+	return defaultMaxSamples
+}
+
+func writeMetricError(w http.ResponseWriter, err error) {
+	var bad badMetricQuery
+	if errors.As(err, &bad) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error())
+}
+
+func parseMetricStep(value string) (time.Duration, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, fmt.Errorf("step is required for metric query_range")
+	}
+	if step, err := time.ParseDuration(value); err == nil {
+		if step <= 0 {
+			return 0, fmt.Errorf("step must be positive")
+		}
+		return step, nil
+	}
+	seconds, err := strconv.ParseFloat(value, 64)
+	if err != nil || seconds <= 0 || math.IsNaN(seconds) || math.IsInf(seconds, 0) {
+		return 0, fmt.Errorf("invalid step %q", value)
+	}
+	return time.Duration(seconds * float64(time.Second)), nil
+}
+
+func evaluationPoints(start, end time.Time, step time.Duration, maxSamples int) ([]time.Time, error) {
+	if step <= 0 {
+		return nil, fmt.Errorf("step must be positive")
+	}
+	if end.Before(start) {
+		return nil, fmt.Errorf("end is before start")
+	}
+	// Loki aligns metric evaluation points to Unix-epoch multiples of the
+	// step: the first point is rounded down and the last point is rounded up.
+	stepNanos := int64(step)
+	startNanos := floorDiv(start.UnixNano(), stepNanos) * stepNanos
+	endNanos := ceilDiv(end.UnixNano(), stepNanos) * stepNanos
+	count := (endNanos-startNanos)/stepNanos + 1
+	if count <= 0 {
+		return nil, fmt.Errorf("invalid evaluation range")
+	}
+	if count > int64(maxSamples) {
+		return nil, fmt.Errorf("loki: query has %d steps, exceeding the %d-sample limit", count, maxSamples)
+	}
+	points := make([]time.Time, 0, count)
+	for at := time.Unix(0, startNanos).UTC(); at.UnixNano() <= endNanos; at = at.Add(step) {
+		points = append(points, at)
+	}
+	return points, nil
+}
+
+func floorDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) != (b < 0) {
+		q--
+	}
+	return q
+}
+
+func ceilDiv(a, b int64) int64 {
+	q := a / b
+	if a%b != 0 && (a < 0) == (b < 0) {
+		q++
+	}
+	return q
+}
+
+func matrixData(series []matrixSeries) []any {
+	out := make([]any, 0, len(series))
+	for _, s := range series {
+		values := make([]any, 0, len(s.Samples))
+		for _, sample := range s.Samples {
+			values = append(values, []any{float64(sample.Timestamp.UnixNano()) / 1e9, formatMetricFloat(sample.Value)})
+		}
+		out = append(out, map[string]any{"metric": s.Labels, "values": values})
+	}
+	return out
+}
+
+func vectorData(series []matrixSeries) []any {
+	out := make([]any, 0, len(series))
+	for _, s := range series {
+		if len(s.Samples) == 0 {
+			continue
+		}
+		sample := s.Samples[0]
+		out = append(out, map[string]any{
+			"metric": s.Labels,
+			"value":  []any{float64(sample.Timestamp.UnixNano()) / 1e9, formatMetricFloat(sample.Value)},
+		})
+	}
+	return out
+}
+
+func formatMetricFloat(v float64) string {
+	switch {
+	case math.IsNaN(v):
+		return "NaN"
+	case math.IsInf(v, 1):
+		return "+Inf"
+	case math.IsInf(v, -1):
+		return "-Inf"
+	default:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	}
+}
+
 func (a *API) handleLabels(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid form: "+err.Error())
@@ -150,10 +331,11 @@ func (a *API) handleLabels(w http.ResponseWriter, r *http.Request) {
 	}
 	names := make(map[string]struct{})
 	for _, entry := range entries {
-		if !matchesAny(selectors, entry) {
+		labels, ok := matchAnyLabels(selectors, entry)
+		if !ok {
 			continue
 		}
-		for name := range entry.Labels {
+		for name := range labels {
 			names[name] = struct{}{}
 		}
 	}
@@ -195,10 +377,11 @@ func (a *API) handleLabelValues(w http.ResponseWriter, r *http.Request) {
 	}
 	values := make(map[string]struct{})
 	for _, entry := range entries {
-		if !matchesAny(selectors, entry) {
+		labels, ok := matchAnyLabels(selectors, entry)
+		if !ok {
 			continue
 		}
-		if value, ok := entry.Labels[name]; ok && value != "" {
+		if value, ok := labels[name]; ok && value != "" {
 			values[value] = struct{}{}
 		}
 	}
@@ -236,10 +419,11 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	seen := make(map[string]map[string]string)
 	for _, entry := range entries {
-		if !matchesAny(selectors, entry) {
+		labels, ok := matchAnyLabels(selectors, entry)
+		if !ok {
 			continue
 		}
-		seen[labelsKey(entry.Labels)] = entry.Labels
+		seen[labelsKey(labels)] = labels
 	}
 	keys := make([]string, 0, len(seen))
 	for key := range seen {
@@ -336,6 +520,9 @@ func selectorsFromRequest(r *http.Request) ([]Query, error) {
 		if err != nil {
 			return nil, err
 		}
+		if query.Metric != nil {
+			return nil, fmt.Errorf("loki: labels and series require a stream selector, not a metric query")
+		}
 		selectors = []Query{query}
 	}
 	return selectors, nil
@@ -348,18 +535,21 @@ func parseSelectors(values []string) ([]Query, error) {
 		if err != nil {
 			return nil, err
 		}
+		if query.Metric != nil {
+			return nil, fmt.Errorf("loki: match[] requires a stream selector, not a metric query")
+		}
 		out = append(out, query)
 	}
 	return out, nil
 }
 
-func matchesAny(selectors []Query, entry LogEntry) bool {
+func matchAnyLabels(selectors []Query, entry LogEntry) (map[string]string, bool) {
 	for _, selector := range selectors {
-		if selector.Match(entry) {
-			return true
+		if labels, ok := selector.Evaluate(entry); ok {
+			return labels, true
 		}
 	}
-	return false
+	return nil, false
 }
 
 func labelsKey(labels map[string]string) string {
