@@ -1,6 +1,7 @@
 package frontend
 
 import (
+	"encoding/base64"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/jawaracloud/skopos/internal/auth"
 )
 
 func newTestServer(t *testing.T, backends ...string) *Server {
@@ -292,6 +295,54 @@ func TestBackendTimeoutReturnsBadGateway(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Fatalf("proxy timeout took %s", elapsed)
+	}
+}
+
+func TestBasicAuth(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("proxied"))
+	}))
+	defer backend.Close()
+
+	guard, err := auth.New("viewer", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		Backends:         []string{backend.URL},
+		Version:          "test-version",
+		ReadinessTimeout: time.Second,
+		ProxyTimeout:     time.Second,
+		Auth:             guard,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := s.Handler()
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := doRequest(t, h, http.MethodGet, "http://frontend"+path, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s bypass status = %d", path, rec.Code)
+		}
+	}
+	for _, path := range []string{"/version", "/api/v1/query"} {
+		rec := doRequest(t, h, http.MethodGet, "http://frontend"+path, nil)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s without auth status = %d", path, rec.Code)
+		}
+		if rec.Header().Get("WWW-Authenticate") == "" {
+			t.Fatalf("%s missing WWW-Authenticate", path)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://frontend/api/v1/query", nil)
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("viewer:secret")))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Body.String() != "proxied" {
+		t.Fatalf("proxied response = %d %q", rec.Code, rec.Body.String())
 	}
 }
 

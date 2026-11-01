@@ -84,6 +84,14 @@ app.kubernetes.io/component: {{ $component }}
 {{- end }}
 {{- end }}
 
+{{- define "skopos.auth.secretName" -}}
+{{- if .Values.auth.existingSecret }}
+{{- .Values.auth.existingSecret }}
+{{- else }}
+{{- printf "%s-auth" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
 {{- define "skopos.clickhouse.host" -}}
 {{- include "skopos.clickhouse.fullname" . }}
 {{- end }}

@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jawaracloud/skopos/internal/auth"
 )
 
 // Config configures the frontend proxy.
@@ -28,6 +30,7 @@ type Config struct {
 	ReadinessTimeout time.Duration
 	ProxyTimeout     time.Duration
 	MaxRequestBytes  int64
+	Auth             *auth.Basic
 	Transport        http.RoundTripper
 }
 
@@ -44,6 +47,7 @@ type Server struct {
 	readinessTimeout time.Duration
 	proxyTimeout     time.Duration
 	maxRequestBytes  int64
+	auth             *auth.Basic
 	client           *http.Client
 	next             atomic.Uint64
 }
@@ -102,6 +106,7 @@ func New(cfg Config) (*Server, error) {
 		readinessTimeout: cfg.ReadinessTimeout,
 		proxyTimeout:     cfg.ProxyTimeout,
 		maxRequestBytes:  cfg.MaxRequestBytes,
+		auth:             cfg.Auth,
 		client: &http.Client{
 			Transport: transport,
 			// A proxy must not follow redirects; the client sees them.
@@ -151,6 +156,9 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	var h http.Handler = router
+	if s.auth != nil {
+		h = s.auth.Wrap(h, "/healthz", "/readyz")
+	}
 	h = s.limitBody(h)
 	h = s.securityHeaders(h)
 	h = recoverMiddleware(s.logger, h)

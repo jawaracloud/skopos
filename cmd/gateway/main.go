@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jawaracloud/skopos/internal/auth"
 	"github.com/jawaracloud/skopos/internal/chclient"
 	"github.com/jawaracloud/skopos/internal/config"
 	"github.com/jawaracloud/skopos/internal/frontend"
@@ -40,13 +41,21 @@ func run() error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 
-	if cfg.Mode == config.ModeFrontend {
-		return runFrontend(cfg, logger)
+	var basicAuth *auth.Basic
+	if cfg.AuthEnabled {
+		basicAuth, err = auth.New(cfg.AuthUsername, cfg.AuthPassword)
+		if err != nil {
+			return fmt.Errorf("auth: %w", err)
+		}
 	}
-	return runQueries(cfg, logger)
+
+	if cfg.Mode == config.ModeFrontend {
+		return runFrontend(cfg, logger, basicAuth)
+	}
+	return runQueries(cfg, logger, basicAuth)
 }
 
-func runFrontend(cfg config.Config, logger *slog.Logger) error {
+func runFrontend(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) error {
 	fe, err := frontend.New(frontend.Config{
 		Logger:           logger,
 		Backends:         cfg.QueryURLs,
@@ -54,6 +63,7 @@ func runFrontend(cfg config.Config, logger *slog.Logger) error {
 		ReadinessTimeout: cfg.ReadinessTimeout,
 		ProxyTimeout:     cfg.QueryTimeout,
 		MaxRequestBytes:  cfg.MaxRequestBytes,
+		Auth:             basicAuth,
 	})
 	if err != nil {
 		return fmt.Errorf("frontend: %w", err)
@@ -71,12 +81,13 @@ func runFrontend(cfg config.Config, logger *slog.Logger) error {
 		"query_urls", queryURLs,
 		"query_timeout", cfg.QueryTimeout.String(),
 		"readiness_timeout", cfg.ReadinessTimeout.String(),
+		"auth_enabled", cfg.AuthEnabled,
 	)
 
 	return serve(cfg.ListenAddr, fe.Handler(), logger)
 }
 
-func runQueries(cfg config.Config, logger *slog.Logger) error {
+func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) error {
 	client, err := chclient.New(chclient.Config{
 		BaseURL:          cfg.ClickHouseURL,
 		Database:         cfg.ClickHouseDatabase,
@@ -130,6 +141,7 @@ func runQueries(cfg config.Config, logger *slog.Logger) error {
 		Version:          version,
 		ReadinessTimeout: cfg.ReadinessTimeout,
 		MaxRequestBytes:  cfg.MaxRequestBytes,
+		Auth:             basicAuth,
 		Register:         register,
 	})
 	if err != nil {
@@ -147,6 +159,7 @@ func runQueries(cfg config.Config, logger *slog.Logger) error {
 		"promql", true,
 		"traceql", true,
 		"logql", true,
+		"auth_enabled", cfg.AuthEnabled,
 	}
 	switch cfg.Mode {
 	case config.ModeWorker:

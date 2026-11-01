@@ -10,6 +10,30 @@
     "fullnameOverride": {
       "type": "string"
     },
+    "auth": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "existingSecret",
+        "username",
+        "password"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingSecret": {
+          "type": "string"
+        },
+        "username": {
+          "type": "string"
+        },
+        "password": {
+          "type": "string"
+        }
+      }
+    },
     "clickhouse": {
       "type": "object",
       "additionalProperties": false,

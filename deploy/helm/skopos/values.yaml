@@ -1,6 +1,18 @@
 nameOverride: ""
 fullnameOverride: ""
 
+# Optional HTTP Basic authentication on the public gateway API. /healthz and
+# /readyz stay unauthenticated for Kubernetes probes. Basic auth is only safe
+# over TLS; terminate TLS at an ingress or proxy. Disabled by default.
+auth:
+  enabled: false
+  # Preferred: existing Secret with keys username and password.
+  existingSecret: ""
+  # Inline values are rendered into a Secret, not into a ConfigMap. Use only
+  # when you are not providing existingSecret.
+  username: ""
+  password: ""
+
 # ClickHouse single-node. HA and replication are out of scope for v0.1.
 clickhouse:
   image:

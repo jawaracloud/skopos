@@ -48,6 +48,20 @@ spec:
           env:
             - name: SKOPOS_MODE
               value: "frontend"
+            - name: SKOPOS_AUTH_ENABLED
+              value: {{ .Values.auth.enabled | quote }}
+            {{- if .Values.auth.enabled }}
+            - name: SKOPOS_AUTH_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.auth.secretName" . }}
+                  key: username
+            - name: SKOPOS_AUTH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.auth.secretName" . }}
+                  key: password
+            {{- end }}
             - name: SKOPOS_LISTEN_ADDR
               value: ":{{ .Values.frontend.service.port }}"
             - name: SKOPOS_QUERY_URLS
