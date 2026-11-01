@@ -8,9 +8,9 @@ empty or incorrect result.
 
 | Signal | Ingest | Storage | Query API | Status |
 | --- | --- | --- | --- | --- |
-| Metrics | OBI or OTLP clients -> Collector -> ClickHouse | `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary` | Prometheus-compatible (M3) | Alpha |
-| Traces | OBI or OTLP clients -> Collector -> ClickHouse | `otel_traces`, `otel_traces_trace_id_ts` | Tempo-compatible (M4) | Alpha |
-| Logs | OTLP clients -> Collector -> ClickHouse; filelog receiver not bundled | `otel_logs` | Loki-compatible (M5) | Alpha |
+| Metrics | OBI or OTLP clients -> Collector -> ClickHouse | `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary`; optional S3 cold tier | Prometheus-compatible (M3) | Alpha |
+| Traces | OBI or OTLP clients -> Collector -> ClickHouse | `otel_traces`, `otel_traces_trace_id_ts`; optional S3 cold tier | Tempo-compatible (M4) | Alpha |
+| Logs | OTLP clients -> Collector -> ClickHouse; filelog receiver not bundled | `otel_logs`; optional S3 cold tier | Loki-compatible (M5) | Alpha |
 
 OBI does not emit logs. The default chart accepts logs through the Collector's
 OTLP receiver. A manual k3d smoke test sent traces, metrics, and logs through
@@ -27,8 +27,21 @@ the receiver component and its maturity first.
 | Loki `/loki/api/v1/*` | Implemented alpha | [logql-support.md](logql-support.md) |
 | Health `/healthz`, `/readyz`, `/version` | Implemented | — |
 
-The gateway exposes all three APIs on one port. The Grafana datasource example
-points all three datasource types at that service.
+The gateway exposes all three APIs on one public port. The Grafana datasource
+example points all three datasource types at that service.
+
+## Deployment modes
+
+| Mode | Status | Notes |
+| --- | --- | --- |
+| Single process (`gateway.mode=all`) | Default | One Deployment serves all three APIs and connects to ClickHouse. |
+| Distributed read path (`distributed.enabled=true`) | Alpha | Public frontend proxies to internal stateless query workers. The frontend has no ClickHouse credentials. |
+| Tiered S3 retention (`clickhouse.storage.enabled=true`) | Alpha | Hot local parts move to an S3-compatible cold volume; cold parts stay queryable. |
+| Scheduled backups (`clickhouse.backup.enabled=true`) | Alpha | `BACKUP DATABASE ... TO S3(...)` CronJob to a separate prefix. Backups are restore-only, not queryable through the gateway. |
+
+ClickHouse remains the backend and owns merges/compaction. There is no Skopos
+ingester or Thanos-style compactor. See [storage.md](storage.md) and
+[ADR 0002](adr/0002-distributed-read-path.md).
 
 ## Language support
 
@@ -47,8 +60,11 @@ points all three datasource types at that service.
   `TraceByIDResponse` envelope), and search `spanSets`. The 55-case corpus is
   compared with Tempo 2.7.2 for the supported subset.
 - **LogQL:** stream selectors, line filters, `| json`, `| logfmt`, label
-  filters, and `count_over_time`/`rate` with `sum`/`sum by`. The 11-case corpus
-  is compared with Loki 3.5.7 for the supported subset.
+  filters, and `count_over_time`/`rate` with `sum`/`sum by`. Selector predicates
+  and body line filters are pushed into ClickHouse: `|=`/`!=` use
+  `position(Body, ?)`; `|~`/`!~` use `match(Body, ?)` and can use the
+  case-sensitive `idx_body` text index. Go still evaluates every returned row.
+  The 11-case corpus is compared with Loki 3.5.7 for the supported subset.
 
 ## ClickHouse version
 
@@ -66,6 +82,13 @@ with the beta test matrix.
   something the chart can validate.
 - Query evaluation is in the gateway, not pushed down to ClickHouse. The row
   scan limit and 7-day range bound protect the single-node alpha deployment.
+  LogQL only pushes filters; metric aggregation still happens in the gateway.
+- S3 cold reads are slower than hot reads and depend on the local ClickHouse
+  S3 cache. A backup is not a queryable retention tier; restore it first.
+- Tiered storage and backups need external S3-compatible buckets and
+  credentials. The chart does not create buckets.
+- The distributed frontend scales the read path only. ClickHouse is still a
+  single node in the default chart; there is no ClickHouse replication/HA.
 - The language support lists are intentionally narrow. The current harnesses
   cover a subset: PromQL differential oracle (212 cases), TraceQL corpus
   (55 cases), LogQL corpus (11 cases), and the cerberus three-way gate

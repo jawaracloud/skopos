@@ -72,6 +72,32 @@ curl -s http://127.0.0.1:8080/readyz
 `/readyz` returns 503 when ClickHouse is unreachable. `/healthz` only reports
 that the gateway process is alive.
 
+## Distributed read path (optional)
+
+`distributed.enabled=true` splits the read path:
+
+- `skopos-frontend` proxies Prometheus/Loki/Tempo requests to
+  `SKOPOS_QUERY_URLS`; it has no ClickHouse credentials.
+- `skopos-query` runs the three query heads against ClickHouse.
+- The public Service keeps the name `skopos-gateway` and selects frontend pods.
+- `/readyz` on the frontend returns 503 unless at least one query backend is
+  ready.
+- NetworkPolicy allows Grafana/ingress to the frontend, frontend to query, and
+  query to ClickHouse.
+
+```sh
+helm upgrade --install skopos ./deploy/helm/skopos \
+  --namespace observability \
+  --set distributed.enabled=true \
+  --set frontend.replicaCount=2 \
+  --set query.replicaCount=2
+```
+
+The default (`distributed.enabled=false`, `gateway.mode=all`) remains the
+single-binary deployment. `SKOPOS_MODE=worker` is an explicit alias for
+`SKOPOS_MODE=query`; both register the three query heads. ClickHouse remains
+the backend and owns merges/compaction; this is not a ClickHouse HA topology.
+
 ## Configuration
 
 The important values are:
@@ -94,6 +120,12 @@ The important values are:
 | `clickhouse.backup.enabled` | `false` | Optional CronJob that runs `BACKUP DATABASE` to a separate S3 destination. See [storage.md](storage.md). |
 | `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
 | `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
+| `gateway.mode` | `all` | `all`, `query`/`worker`, or `frontend` for a single Deployment. |
+| `distributed.enabled` | `false` | Split into a public frontend and an internal query tier. |
+| `frontend.replicaCount` | `1` | Public proxy replicas when distributed. |
+| `frontend.config.queryTimeout` | `30s` | Per-request proxy timeout. |
+| `frontend.config.readinessTimeout` | `1s` | Frontend probe timeout for query `/readyz`. |
+| `query.replicaCount` | `1` | Internal query worker replicas when distributed. |
 | `gateway.image.digest` | `""` | Release images must set this. |
 | `networkPolicy.enabled` | `true` | Component ingress NetworkPolicies. |
 | `networkPolicy.gateway.allowFrom` | `[{namespaceSelector: {}}]` | Namespace/label selectors allowed to reach the gateway. Empty means no ingress. Tighten this to your Grafana namespace. |

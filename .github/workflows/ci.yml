@@ -100,6 +100,18 @@ jobs:
       - name: Prometheus + cerberus + Skopos
         run: test/compat/cerberus/run.sh
 
+  storage:
+    name: S3 tiered storage and backup (RustFS)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: Run ClickHouse + RustFS integration
+        run: test/integration/s3/run.sh
+
   helm:
     name: Helm lint and render
     runs-on: ubuntu-24.04
@@ -137,3 +149,20 @@ jobs:
           helm template skopos deploy/helm/skopos --namespace observability \
             --set gateway.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /tmp/skopos-digest.yaml
+      - name: Render tiered storage and backup
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set clickhouse.storage.enabled=true \
+            --set clickhouse.storage.cold.endpoint=http://rustfs:9000 \
+            --set clickhouse.storage.cold.bucket=skopos-cold \
+            --set clickhouse.storage.cold.accessKeyId=fake \
+            --set clickhouse.storage.cold.secretAccessKey=fake \
+            --set clickhouse.backup.enabled=true \
+            --set clickhouse.backup.endpoint=http://rustfs:9000 \
+            --set clickhouse.backup.bucket=skopos-backup \
+            --set clickhouse.backup.accessKeyId=fake \
+            --set clickhouse.backup.secretAccessKey=fake \
+            > /tmp/skopos-storage.yaml
+          grep -q 'kind: CronJob' /tmp/skopos-storage.yaml
+          test "$(grep -c 'TO VOLUME' /tmp/skopos-storage.yaml)" -eq 8
+          grep -q 'storage_policy = .tiered.' /tmp/skopos-storage.yaml

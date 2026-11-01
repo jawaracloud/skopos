@@ -36,6 +36,10 @@ existing Grafana.
 | Grafana datasource examples | Alpha-ready | All three datasource types point at the gateway. |
 | Benchmarks | Measured | Compression and p95 latency in [docs/benchmarks.md](docs/benchmarks.md). |
 | Three-way differential | Passed for Skopos | 124 checks vs Prometheus/Loki/Tempo and cerberus v1.23.1: 0 Skopos divergences, 39 cerberus-only gaps baseline-pinned. |
+| Distributed read path | Alpha | Optional public frontend plus stateless query workers (`distributed.enabled=true`); the frontend has no ClickHouse credentials. |
+| S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
+| LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
+| OpenSSF | Measured | Scorecard CLI 4.1 on the remote baseline; Best Practices evidence package prepared. The badge is blocked until the repository is public. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
 | Release tooling | Scaffolded | SBOM fallback, signed-image hooks, chart package, and release workflow in [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
@@ -57,13 +61,19 @@ Kubernetes cluster
 |                         v                                        |
 |              ClickHouse single-node (StatefulSet + PVC)          |
 |              otel_traces, otel_logs, otel_metrics_*              |
+|              hot parts -> optional S3 cold tier                  |
 |                                       ^                          |
 |                                       | HTTP, read-only user     |
-|                         Skopos gateway (Go, ClusterIP)           |
+|                         Skopos query workers (Go, internal)      |
 |                         Prometheus / Loki / Tempo APIs (alpha)    |
 |                                       ^                          |
 |                                       |                          |
+|                         Skopos frontend (public, no CH creds)    |
+|                                       ^                          |
+|                                       |                          |
 |                         Grafana (user-managed)                   |
+|                                                                  |
+|  optional CronJob -> BACKUP DATABASE -> separate S3 prefix        |
 +------------------------------------------------------------------+
 ```
 
@@ -71,6 +81,21 @@ OBI emits metrics and traces. Logs can arrive over OTLP through the Collector,
 or through a separate log pipeline (for example a filelog receiver); a filelog
 receiver must be verified before it is enabled. The gateway never stores or
 accepts telemetry. It only reads from ClickHouse.
+
+## Deployment modes
+
+- **Single process (default).** `gateway.mode=all` keeps the v0.1 shape: one
+  Deployment serves the three APIs and talks to ClickHouse.
+- **Distributed read path.** `distributed.enabled=true` renders a public
+  frontend and an internal query tier. The frontend proxies to
+  `SKOPOS_QUERY_URLS` and reports ready only when a query backend is ready. The
+  public Service keeps the name `skopos-gateway`.
+- **S3 retention.** Tiered storage moves old ClickHouse parts to an
+  S3-compatible cold volume; a separate backup CronJob writes to a different
+  prefix. Backups are for restore, not for serving queries. ClickHouse owns
+  merges/compaction; there is no Skopos compactor.
+
+The detailed decisions are in [ADR 0002](docs/adr/0002-distributed-read-path.md).
 
 ## Quick start
 
@@ -103,6 +128,22 @@ helm upgrade skopos ./deploy/helm/skopos --namespace observability \
   --set gateway.image.tag=0.1.0-alpha.1 \
   --set gateway.image.digest= \
   --set gateway.image.pullPolicy=IfNotPresent
+```
+
+For the distributed read path:
+
+```sh
+helm upgrade skopos ./deploy/helm/skopos --namespace observability \
+  --set distributed.enabled=true \
+  --set frontend.replicaCount=2 \
+  --set query.replicaCount=2
+```
+
+For tiered S3 retention and scheduled backups, see
+[docs/storage.md](docs/storage.md). The local integration test uses RustFS:
+
+```sh
+./test/integration/s3/run.sh
 ```
 
 Check the data plane:
@@ -143,7 +184,9 @@ make helm-template        # render the chart
 make check                # vet + test + fuzz + helm lint
 make e2e-obi              # real privileged OBI e2e (Docker, BTF, tracefs)
 make compat-cerberus      # three-way PromQL/LogQL/TraceQL differential
+make storage-test         # ClickHouse + RustFS tiered storage/backup test
 make bench                # synthetic compression + latency benchmark
+make scorecard            # OpenSSF Scorecard CLI (requires a GitHub token)
 make release-check        # vet/test/Helm/release script syntax
 ```
 
@@ -164,13 +207,17 @@ the internet. See [SECURITY.md](SECURITY.md) and [docs/install.md](docs/install.
 ## Documentation
 
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
+- [ADR 0002: distributed read path](docs/adr/0002-distributed-read-path.md)
 - [Installation and operations](docs/install.md)
+- [Tiered storage and backups](docs/storage.md)
 - [Support matrix](docs/support-matrix.md)
 - [Beta gate status](docs/beta-gates.md)
 - [PromQL support](docs/promql-support.md)
 - [TraceQL support](docs/traceql-support.md)
 - [LogQL support](docs/logql-support.md)
 - [Benchmarks](docs/benchmarks.md)
+- [OpenSSF Scorecard](docs/openssf-scorecard.md)
+- [OpenSSF Best Practices](docs/openssf-best-practices.md)
 - [Release runbook](docs/release.md)
 - [Dependency and supply-chain policy](docs/dependencies.md)
 - [Contributing](CONTRIBUTING.md)

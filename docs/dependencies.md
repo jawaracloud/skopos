@@ -56,8 +56,10 @@ These tools are not linked into the gateway binary:
 | Go | 1.27.x | Build and test |
 | Helm | 3.19+ or 4.x | Chart lint and render |
 | govulncheck | v1.9.0 | Vulnerability scan |
-| Docker / Compose | any current release | ClickHouse integration tests, Loki/Tempo differential harnesses, OBI e2e |
+| Docker / Compose | any current release | ClickHouse integration tests, Loki/Tempo/cerberus harnesses, S3 + RustFS test, OBI e2e |
 | actionlint | v1.7.12 | Workflow syntax checks (local/release check) |
+| OpenSSF Scorecard CLI | v5.6.0 | Scorecard scan via `scripts/scorecard.sh`; checksum-verified, not linked into the gateway |
+| gitleaks | v8.30.1 | Local secret scan during the OpenSSF pass; not a CI dependency |
 
 ## Pinned container images
 
@@ -78,6 +80,8 @@ Reference implementations are test-only containers, pinned in their harnesses:
 | Loki reference | `grafana/loki` | `3.5.7` | `sha256:0eaee7bf39cc83aaef46914fb58f287d4f4c4be6ec96b86c2ed55719a75e49c8` |
 | cerberus reference | `ghcr.io/tsouza/cerberus` | `v1.23.1` | `sha256:e5ced00b1ee85c371295147ed0bce9caa4a5c5554443ee8aabc329d5351dc4a5` |
 | Prometheus reference | `prom/prometheus` | `v3.15.1` | `sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2` |
+| RustFS S3 test | `rustfs/rustfs` | `1.0.4` | `sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2` |
+| AWS CLI test client | `amazon/aws-cli` | `2.31.7` | pinned in `test/integration/s3/docker-compose.yml` |
 
 The Skopos gateway image is built from this repository. The default chart uses a
 tag for local development; release values must set
@@ -110,5 +114,9 @@ Still required before publishing the alpha release:
 - Project-owned signing keys or OIDC identity and registry credentials.
 - A real published image digest in release values.
 - A separate, reviewed dependency and image version-bump workflow.
-- `govulncheck`, module checksum verification, vendor verification, fuzz, and
-  the PromQL differential oracle as blocking CI gates (current CI runs them).
+- `govulncheck`, module checksum verification, vendor verification, fuzz,
+  the PromQL differential oracle, the S3/RustFS integration test, and the
+  Tempo/Loki/cerberus reference harnesses as blocking CI gates (current CI
+  runs them).
+- OpenSSF Scorecard CLI v5.6.0 runs weekly with a read-only token. The official
+  Scorecard action is optional and requires GHAS on a private repository.

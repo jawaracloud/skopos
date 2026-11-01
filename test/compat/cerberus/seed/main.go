@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -114,13 +115,22 @@ type seeder struct {
 	database string
 }
 
-func (s *seeder) applySchema(ctx context.Context, path string) error {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return fmt.Errorf("read schema: %w", err)
-	}
-	rendered := strings.NewReplacer(
-		"{{ .Values.clickhouse.database }}", s.database,
+// storageIfBlock matches the chart's storage-enabled TTL blocks. The seeder
+// uses local-only storage, so it keeps the {{- else }} branch.
+var storageIfBlock = regexp.MustCompile(`(?s)\{\{- if \.Values\.clickhouse\.storage\.enabled \}\}.*?\{\{- else \}\}(.*?)\{\{- end \}\}`)
+
+// renderChartDefaults renders the chart schema with storage disabled. It is a
+// deliberately small renderer for the one conditional used by schema.sql; if
+// the schema grows more conditionals, replace this with Helm or a full
+// template renderer and keep the tests in sync.
+func renderChartDefaults(raw, database string) string {
+	// Remove the inline storage_policy fragment before matching the block form.
+	// Otherwise an inline {{- if }} can pair with the next table's {{- else }}.
+	rendered := strings.ReplaceAll(raw,
+		"{{- if .Values.clickhouse.storage.enabled }}, storage_policy = 'tiered'{{- end }}", "")
+	rendered = storageIfBlock.ReplaceAllString(rendered, "$1")
+	return strings.NewReplacer(
+		"{{ .Values.clickhouse.database }}", database,
 		"{{ .Values.clickhouse.tables.traces }}", "otel_traces",
 		"{{ .Values.clickhouse.tables.logs }}", "otel_logs",
 		"{{ .Values.clickhouse.tables.metricsGauge }}", "otel_metrics_gauge",
@@ -131,7 +141,18 @@ func (s *seeder) applySchema(ctx context.Context, path string) error {
 		"{{ .Values.clickhouse.ttl.tracesDays }}", "20000",
 		"{{ .Values.clickhouse.ttl.logsDays }}", "20000",
 		"{{ .Values.clickhouse.ttl.metricsDays }}", "20000",
-	).Replace(string(raw))
+		"{{ .Values.clickhouse.storage.hotDays }}", "1",
+		"{{ .Values.clickhouse.storage.totalDays }}", "20000",
+		"{{ .Values.clickhouse.storage.coldVolume }}", "cold",
+	).Replace(rendered)
+}
+
+func (s *seeder) applySchema(ctx context.Context, path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read schema: %w", err)
+	}
+	rendered := renderChartDefaults(string(raw), s.database)
 	if strings.Contains(rendered, "{{") {
 		return fmt.Errorf("schema still contains Helm placeholders after rendering")
 	}

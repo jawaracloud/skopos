@@ -7,7 +7,7 @@ VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus bench release release-dry-run release-check scorecard
+.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus storage-test bench release release-dry-run release-check scorecard
 
 help:
 	@printf '%s\n' \
@@ -22,6 +22,7 @@ help:
 		'helm-template     render the Helm chart' \
 		'e2e-obi           run the real OBI end-to-end harness (Docker, Linux)' \
 		'compat-cerberus   run the cerberus three-way differential' \
+		'storage-test      run ClickHouse + RustFS tiered storage and backup test' \
 		'bench             run the ClickHouse compression and gateway latency benchmark' \
 		'release           build and package release artifacts (VERSION=...)' \
 		'release-dry-run   release build without pushing or signing' \
@@ -66,6 +67,9 @@ e2e-obi:
 compat-cerberus:
 	./test/compat/cerberus/run.sh
 
+storage-test:
+	./test/integration/s3/run.sh
+
 bench:
 	./test/bench/run.sh
 
@@ -89,6 +93,7 @@ release-check: vet test helm-lint
 	sh -n test/e2e/obi/load.sh
 	sh -n test/e2e/obi/render-schema.sh
 	sh -n test/e2e/obi/init-clickhouse.sh
+	sh -n test/integration/s3/run.sh
 	sh -n test/bench/run.sh
 	sh -n test/bench/measure-compression.sh
 	@printf '%s\n' 'release-check: ok'
