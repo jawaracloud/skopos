@@ -232,6 +232,7 @@ gateway to the internet without TLS and an authenticating edge. See
 
 ## Documentation
 
+- [Documentation index](docs/README.md)
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
 - [ADR 0002: distributed read path](docs/adr/0002-distributed-read-path.md)
 - [Installation and operations](docs/install.md)
