@@ -25,8 +25,9 @@ Limits:
 - `detail` defaults to `minimal`.
 - `limit` defaults to `20`, maximum `50` for metric lists; `10`/`20` for service
   metrics.
-- `include` is a whitelist: `labels`, `query`, `runbook`, `related`, `caveats`,
-  `provenance`.
+- `include` is signal-specific: metrics accept `labels`, `query`, `runbook`,
+  `related`, `caveats`, `provenance`; logs add `fields`; traces add
+  `downstream`.
 - empty fields are omitted, not emitted as `null`.
 - descriptions are at most 160 bytes, caveats at most 2, queries at most 512
   bytes.
@@ -45,6 +46,12 @@ GET /api/v1/context/metrics?service=checkout&role=latency&limit=20
 GET /api/v1/context/metrics/{name}?detail=minimal
 GET /api/v1/context/metrics/{name}?detail=full&include=labels,caveats
 GET /api/v1/context/services/{service}?limit=10
+GET /api/v1/context/logs?service=checkout&limit=20
+GET /api/v1/context/logs/{id}?detail=minimal
+GET /api/v1/context/traces?service=checkout&limit=20
+GET /api/v1/context/traces/{id}?detail=minimal
+GET /api/v1/context/coverage
+GET /.well-known/skopos.json
 ```
 
 All routes are protected by Basic auth when auth is enabled, like the query
@@ -107,11 +114,56 @@ an invitation to invent a role.
 
 `has_more` is added when the catalog is larger than the requested limit.
 
+### Log and trace cards
+
+Log and trace context cards use the same minimal/standard/full and include
+rules:
+
+```json
+{
+  "schema": "ctx/v1",
+  "id": "checkout.error",
+  "known": true,
+  "service": "checkout",
+  "event": "exception",
+  "description": "Checkout request failures",
+  "severity": ["ERROR", "FATAL"],
+  "flags": ["slo_metric"],
+  "sources": ["catalog"]
+}
+```
+
+```json
+{
+  "schema": "ctx/v1",
+  "id": "checkout.get",
+  "known": true,
+  "service": "checkout",
+  "operation": "GET /checkout",
+  "kind": "server",
+  "critical_path": true,
+  "description": "Checkout request path",
+  "flags": ["slo_metric"],
+  "sources": ["catalog"]
+}
+```
+
+`GET /api/v1/context/logs` and `/traces` return only compact list items.
+`detail=standard` adds the query, runbook, fields/downstream; `detail=full`
+adds caveats and provenance. `GET /api/v1/context/coverage` returns documented
+counts, not a fabricated ratio.
+
 ### Service response
 
 `GET /api/v1/context/services/checkout` returns the service description, owner,
 runbook, a bounded list of metrics, and optional log/trace hints. It does not
 inline full metric contexts; the agent requests those separately by name.
+
+### Discovery
+
+`GET /.well-known/skopos.json` describes the context API, signal list, detail
+levels, and query API paths. When Basic auth is enabled, pass the same
+credentials as the other APIs.
 
 ## Catalog format
 
@@ -149,6 +201,10 @@ for a complete example.
   }
 }
 ```
+
+`logs` and `traces` are top-level objects keyed by URL-safe context IDs. A
+service can reference those IDs in its `logs`/`traces` lists. See the example
+catalog for `checkout.error` and `checkout.get`.
 
 ### Enums
 
@@ -219,24 +275,55 @@ Future sources (collector metadata, OTel semantic conventions, ClickHouse
 observed type/unit) must be labeled with their own provenance and confidence;
 they must not silently overwrite catalog data.
 
+## MCP server
+
+`cmd/skopos-mcp` is a stdio MCP server for AI SRE agents. It calls the gateway
+over HTTP and exposes compact context plus query tools:
+
+```text
+list_metrics
+get_metric_context
+get_service_context
+list_logs
+get_log_context
+list_traces
+get_trace_context
+get_context_coverage
+get_well_known
+query_promql
+query_logql
+search_traces
+```
+
+Build and run:
+
+```sh
+make mcp
+SKOPOS_GATEWAY_URL=http://127.0.0.1:8080   SKOPOS_AUTH_USERNAME=viewer   SKOPOS_AUTH_PASSWORD=change-me   ./bin/skopos-mcp
+```
+
+The server speaks newline-delimited JSON-RPC 2.0 on stdin/stdout, supports the
+MCP `initialize`, `tools/list`, and `tools/call` methods, and returns tool errors
+as MCP `isError` results. Responses larger than `SKOPOS_MCP_MAX_BYTES` (default
+64 KiB) are rejected with a “narrow the query” error instead of flooding the
+model context.
+
 ## Agent flow
 
 ```text
-1. list metrics for a service or role
-2. get one metric context with detail=minimal
-3. optionally request detail=full or include=labels
-4. run the recommended query
+1. get_well_known / get_service_context
+2. list_metrics or list logs/traces
+3. get_*_context with detail=minimal
+4. optionally request detail=full or include fields
+5. run the recommended query
 ```
 
 This keeps the model context small: one compact service card, one compact
-metric, then a query.
+signal card, then a query.
 
-## Phase 2
+## Phase 3
 
-- MCP tools: `get_service_context`, `get_metric_context`, `list_metrics`,
-  `query_promql`, `query_logql`, `search_traces`.
 - Automatic observed metadata with `source=clickhouse`, `confidence` lower than
   explicit catalog.
-- Log and trace context cards.
-- Coverage metrics such as `skopos_context_coverage_ratio`.
-- `/.well-known/skopos.json` discovery.
+- Coverage across observed metrics, not just documented catalog entries.
+- Remote MCP transport (Streamable HTTP) in addition to stdio.

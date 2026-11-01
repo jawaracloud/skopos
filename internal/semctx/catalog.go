@@ -40,6 +40,11 @@ const (
 	maxServiceLinks = 20
 	maxServiceItems = 50
 	maxLinkText     = 200
+	maxLogs         = 5000
+	maxTraces       = 5000
+	maxLogFields    = 20
+	maxSeverity     = 6
+	maxDownstream   = 20
 )
 
 var (
@@ -48,15 +53,18 @@ var (
 	flagRE        = regexp.MustCompile(`^[a-z][a-z0-9_]{0,31}$`)
 	versionRE     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
 	serviceNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
+	contextIDRE   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
 // Catalog is the operator-authored semantic context. The source of truth is
 // explicit catalog data; no field is inferred by the gateway.
 type Catalog struct {
-	Schema   string             `json:"schema"`
-	Version  string             `json:"version"`
-	Metrics  map[string]Metric  `json:"metrics,omitempty"`
-	Services map[string]Service `json:"services,omitempty"`
+	Schema   string                  `json:"schema"`
+	Version  string                  `json:"version"`
+	Metrics  map[string]Metric       `json:"metrics,omitempty"`
+	Services map[string]Service      `json:"services,omitempty"`
+	Logs     map[string]LogContext   `json:"logs,omitempty"`
+	Traces   map[string]TraceContext `json:"traces,omitempty"`
 }
 
 // Metric is one explicit metric context entry.
@@ -84,6 +92,33 @@ type Service struct {
 	Metrics     []string `json:"metrics,omitempty"`
 	Logs        []string `json:"logs,omitempty"`
 	Traces      []string `json:"traces,omitempty"`
+}
+
+// LogContext describes one operator-defined log stream/event family.
+type LogContext struct {
+	Description string            `json:"description"`
+	Service     string            `json:"service"`
+	Event       string            `json:"event,omitempty"`
+	Severity    []string          `json:"severity,omitempty"`
+	Query       string            `json:"query,omitempty"`
+	Runbook     string            `json:"runbook,omitempty"`
+	Fields      map[string]string `json:"fields,omitempty"`
+	Caveats     []string          `json:"caveats,omitempty"`
+	Flags       []string          `json:"flags,omitempty"`
+}
+
+// TraceContext describes one operator-defined service operation.
+type TraceContext struct {
+	Description  string   `json:"description"`
+	Service      string   `json:"service"`
+	Operation    string   `json:"operation"`
+	Kind         string   `json:"kind,omitempty"`
+	CriticalPath bool     `json:"critical_path,omitempty"`
+	Downstream   []string `json:"downstream,omitempty"`
+	Query        string   `json:"query,omitempty"`
+	Runbook      string   `json:"runbook,omitempty"`
+	Caveats      []string `json:"caveats,omitempty"`
+	Flags        []string `json:"flags,omitempty"`
 }
 
 // EmptyCatalog returns a valid empty catalog. It is used when no context file
@@ -165,6 +200,12 @@ func (c *Catalog) Validate() error {
 	if len(c.Services) > maxServices {
 		return fmt.Errorf("too many services: %d > %d", len(c.Services), maxServices)
 	}
+	if len(c.Logs) > maxLogs {
+		return fmt.Errorf("too many logs: %d > %d", len(c.Logs), maxLogs)
+	}
+	if len(c.Traces) > maxTraces {
+		return fmt.Errorf("too many traces: %d > %d", len(c.Traces), maxTraces)
+	}
 
 	metricNames := make([]string, 0, len(c.Metrics))
 	for name := range c.Metrics {
@@ -205,6 +246,33 @@ func (c *Catalog) Validate() error {
 			if _, ok := c.Services[metric.Service]; !ok {
 				return fmt.Errorf("metric %q: service %q is not in the catalog", name, metric.Service)
 			}
+		}
+	}
+
+	logNames := make([]string, 0, len(c.Logs))
+	for id := range c.Logs {
+		logNames = append(logNames, id)
+	}
+	sort.Strings(logNames)
+	for _, id := range logNames {
+		if !contextIDRE.MatchString(id) {
+			return fmt.Errorf("log context id %q is invalid", id)
+		}
+		if err := validateLogContext(c.Logs[id], c.Services); err != nil {
+			return fmt.Errorf("log context %q: %w", id, err)
+		}
+	}
+	traceNames := make([]string, 0, len(c.Traces))
+	for id := range c.Traces {
+		traceNames = append(traceNames, id)
+	}
+	sort.Strings(traceNames)
+	for _, id := range traceNames {
+		if !contextIDRE.MatchString(id) {
+			return fmt.Errorf("trace context id %q is invalid", id)
+		}
+		if err := validateTraceContext(c.Traces[id], c.Services); err != nil {
+			return fmt.Errorf("trace context %q: %w", id, err)
 		}
 	}
 	return nil
@@ -283,20 +351,125 @@ func validateMetric(m Metric, services map[string]Service) error {
 			return err
 		}
 	}
-	if len(m.Flags) > maxFlags {
-		return fmt.Errorf("too many flags: %d > %d", len(m.Flags), maxFlags)
+	return validateFlags(m.Flags)
+}
+
+func validateFlags(flags []string) error {
+	if len(flags) > maxFlags {
+		return fmt.Errorf("too many flags: %d > %d", len(flags), maxFlags)
 	}
-	seenFlags := make(map[string]struct{}, len(m.Flags))
-	for _, flag := range m.Flags {
+	seen := make(map[string]struct{}, len(flags))
+	for _, flag := range flags {
 		if !flagRE.MatchString(flag) {
 			return fmt.Errorf("flag %q is invalid", flag)
 		}
-		if _, ok := seenFlags[flag]; ok {
+		if _, ok := seen[flag]; ok {
 			return fmt.Errorf("duplicate flag %q", flag)
 		}
-		seenFlags[flag] = struct{}{}
+		seen[flag] = struct{}{}
 	}
 	return nil
+}
+
+func validateQuery(query string) error {
+	if query != "" && (len(query) > maxQuery || strings.ContainsAny(query, "\r\n")) {
+		return fmt.Errorf("query is too long or contains a newline")
+	}
+	return nil
+}
+
+func validateLogContext(l LogContext, services map[string]Service) error {
+	if err := requireText("description", l.Description, maxDescription); err != nil {
+		return err
+	}
+	if !serviceNameRE.MatchString(l.Service) {
+		return fmt.Errorf("service %q is invalid", l.Service)
+	}
+	if _, ok := services[l.Service]; !ok {
+		return fmt.Errorf("service %q is not in the catalog", l.Service)
+	}
+	if l.Event != "" && (len(l.Event) > maxMetricName || strings.TrimSpace(l.Event) != l.Event) {
+		return fmt.Errorf("event is invalid")
+	}
+	if len(l.Severity) > maxSeverity {
+		return fmt.Errorf("too many severity values")
+	}
+	for _, severity := range l.Severity {
+		if !oneOf(severity, "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL") {
+			return fmt.Errorf("severity %q is invalid", severity)
+		}
+	}
+	if err := validateQuery(l.Query); err != nil {
+		return err
+	}
+	if l.Runbook != "" {
+		if err := validateURL("runbook", l.Runbook); err != nil {
+			return err
+		}
+	}
+	if len(l.Fields) > maxLogFields {
+		return fmt.Errorf("too many fields: %d > %d", len(l.Fields), maxLogFields)
+	}
+	for key, value := range l.Fields {
+		if !labelNameRE.MatchString(key) {
+			return fmt.Errorf("field name %q is invalid", key)
+		}
+		if err := requireText("field "+key, value, maxLabelValue); err != nil {
+			return err
+		}
+	}
+	if len(l.Caveats) > maxCaveats {
+		return fmt.Errorf("too many caveats")
+	}
+	for _, caveat := range l.Caveats {
+		if err := requireText("caveat", caveat, maxCaveat); err != nil {
+			return err
+		}
+	}
+	return validateFlags(l.Flags)
+}
+
+func validateTraceContext(t TraceContext, services map[string]Service) error {
+	if err := requireText("description", t.Description, maxDescription); err != nil {
+		return err
+	}
+	if !serviceNameRE.MatchString(t.Service) {
+		return fmt.Errorf("service %q is invalid", t.Service)
+	}
+	if _, ok := services[t.Service]; !ok {
+		return fmt.Errorf("service %q is not in the catalog", t.Service)
+	}
+	if err := requireText("operation", t.Operation, maxMetricName); err != nil {
+		return err
+	}
+	if t.Kind != "" && !oneOf(t.Kind, "server", "client", "producer", "consumer", "internal", "unspecified") {
+		return fmt.Errorf("kind %q is invalid", t.Kind)
+	}
+	if len(t.Downstream) > maxDownstream {
+		return fmt.Errorf("too many downstream services")
+	}
+	for _, service := range t.Downstream {
+		if !serviceNameRE.MatchString(service) {
+			return fmt.Errorf("downstream service %q is invalid", service)
+		}
+	}
+	if err := validateQuery(t.Query); err != nil {
+		return err
+	}
+	if t.Runbook != "" {
+		if err := validateURL("runbook", t.Runbook); err != nil {
+			return err
+		}
+	}
+	if len(t.Caveats) > maxCaveats {
+		return fmt.Errorf("too many caveats")
+	}
+	for _, caveat := range t.Caveats {
+		if err := requireText("caveat", caveat, maxCaveat); err != nil {
+			return err
+		}
+	}
+	return validateFlags(t.Flags)
 }
 
 func validateService(s Service, metrics map[string]Metric) error {

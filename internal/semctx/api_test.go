@@ -224,6 +224,114 @@ func TestServiceLimitDoesNotMutateCatalog(t *testing.T) {
 	}
 }
 
+func TestLogContext(t *testing.T) {
+	handler := apiFor(t, mustCatalog(t))
+	minimal := get(t, handler, "/api/v1/context/logs/checkout.error")
+	if minimal.Code != http.StatusOK {
+		t.Fatalf("status = %d", minimal.Code)
+	}
+	body := decodeMap(t, minimal)
+	if body["known"] != true || body["event"] != "exception" {
+		t.Fatalf("log = %v", body)
+	}
+	if _, ok := body["query"]; ok {
+		t.Fatal("minimal log response contains query")
+	}
+	if minimal.Body.Len() > 800 {
+		t.Fatalf("minimal log response is too large: %d", minimal.Body.Len())
+	}
+	standard := decodeMap(t, get(t, handler, "/api/v1/context/logs/checkout.error?detail=standard"))
+	if standard["query"] == nil || standard["fields"] == nil || standard["runbook"] == nil {
+		t.Fatalf("standard log = %v", standard)
+	}
+	full := decodeMap(t, get(t, handler, "/api/v1/context/logs/checkout.error?detail=full"))
+	if full["caveats"] == nil || full["provenance"] == nil {
+		t.Fatalf("full log = %v", full)
+	}
+	unknown := get(t, handler, "/api/v1/context/logs/missing")
+	if unknownBody := decodeMap(t, unknown); unknownBody["known"] != false || unknownBody["flags"] == nil {
+		t.Fatalf("unknown log = %v", unknownBody)
+	}
+}
+
+func TestTraceContext(t *testing.T) {
+	handler := apiFor(t, mustCatalog(t))
+	minimal := get(t, handler, "/api/v1/context/traces/checkout.get")
+	if minimal.Code != http.StatusOK {
+		t.Fatalf("status = %d", minimal.Code)
+	}
+	body := decodeMap(t, minimal)
+	if body["known"] != true || body["operation"] != "GET /checkout" || body["critical_path"] != true {
+		t.Fatalf("trace = %v", body)
+	}
+	if _, ok := body["downstream"]; ok {
+		t.Fatal("minimal trace response contains downstream")
+	}
+	if minimal.Body.Len() > 800 {
+		t.Fatalf("minimal trace response is too large: %d", minimal.Body.Len())
+	}
+	standard := decodeMap(t, get(t, handler, "/api/v1/context/traces/checkout.get?detail=standard"))
+	if standard["query"] == nil || standard["downstream"] == nil {
+		t.Fatalf("standard trace = %v", standard)
+	}
+	full := decodeMap(t, get(t, handler, "/api/v1/context/traces/checkout.get?detail=full"))
+	if full["caveats"] == nil || full["provenance"] == nil {
+		t.Fatalf("full trace = %v", full)
+	}
+	unknown := get(t, handler, "/api/v1/context/traces/missing")
+	if unknownBody := decodeMap(t, unknown); unknownBody["known"] != false {
+		t.Fatalf("unknown trace = %v", unknownBody)
+	}
+}
+
+func TestLogAndTraceLists(t *testing.T) {
+	handler := apiFor(t, mustCatalog(t))
+	logs := decodeMap(t, get(t, handler, "/api/v1/context/logs?service=checkout&limit=10"))
+	if logs["total"] != float64(1) {
+		t.Fatalf("logs = %v", logs)
+	}
+	logItem := logs["items"].([]any)[0].(map[string]any)
+	if logItem["id"] != "checkout.error" || logItem["event"] != "exception" {
+		t.Fatalf("log item = %v", logItem)
+	}
+	traces := decodeMap(t, get(t, handler, "/api/v1/context/traces?service=checkout&limit=10"))
+	if traces["total"] != float64(1) {
+		t.Fatalf("traces = %v", traces)
+	}
+	traceItem := traces["items"].([]any)[0].(map[string]any)
+	if traceItem["id"] != "checkout.get" || traceItem["kind"] != "server" {
+		t.Fatalf("trace item = %v", traceItem)
+	}
+	for _, path := range []string{
+		"/api/v1/context/logs/checkout.error?include=labels",
+		"/api/v1/context/traces/checkout.get?include=fields",
+		"/api/v1/context/logs?limit=51",
+		"/api/v1/context/traces?limit=0",
+	} {
+		if rec := get(t, handler, path); rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s status = %d", path, rec.Code)
+		}
+	}
+}
+
+func TestCoverageAndWellKnown(t *testing.T) {
+	handler := apiFor(t, mustCatalog(t))
+	coverage := decodeMap(t, get(t, handler, "/api/v1/context/coverage"))
+	if coverage["metrics"].(map[string]any)["documented"] != float64(2) ||
+		coverage["logs"].(map[string]any)["documented"] != float64(1) ||
+		coverage["traces"].(map[string]any)["documented"] != float64(1) {
+		t.Fatalf("coverage = %v", coverage)
+	}
+	wellKnown := decodeMap(t, get(t, handler, "/.well-known/skopos.json"))
+	if wellKnown["schema"] != "skopos.well-known/v1" || wellKnown["context_api"] != "/api/v1/context" {
+		t.Fatalf("well-known = %v", wellKnown)
+	}
+	signals, _ := wellKnown["signals"].([]any)
+	if len(signals) != 4 {
+		t.Fatalf("signals = %v", signals)
+	}
+}
+
 func TestETagCache(t *testing.T) {
 	handler := apiFor(t, mustCatalog(t))
 	first := get(t, handler, "/api/v1/context/metrics/demo_temperature_celsius")

@@ -34,10 +34,51 @@
         "http_server_request_duration_seconds"
       ],
       "logs": [
-        "checkout error logs"
+        "checkout.error"
       ],
       "traces": [
-        "GET /checkout"
+        "checkout.get"
+      ]
+    }
+  },
+  "logs": {
+    "checkout.error": {
+      "description": "Checkout request failures",
+      "service": "checkout",
+      "event": "exception",
+      "severity": [
+        "ERROR",
+        "FATAL"
+      ],
+      "query": "{service_name=\"checkout\"} | json | level=\"error\"",
+      "runbook": "https://runbooks.example.com/checkout/errors",
+      "fields": {
+        "level": "log level",
+        "status": "HTTP status"
+      },
+      "caveats": [
+        "Error logs are sampled by the application."
+      ],
+      "flags": [
+        "slo_metric"
+      ]
+    }
+  },
+  "traces": {
+    "checkout.get": {
+      "description": "Checkout request path",
+      "service": "checkout",
+      "operation": "GET /checkout",
+      "kind": "server",
+      "critical_path": true,
+      "downstream": [
+        "payments",
+        "redis"
+      ],
+      "query": "{ resource.service.name = \"checkout\" && span.name = \"GET /checkout\" }",
+      "runbook": "https://runbooks.example.com/checkout/latency",
+      "flags": [
+        "slo_metric"
       ]
     }
   }

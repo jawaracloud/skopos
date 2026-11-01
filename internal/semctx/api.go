@@ -26,9 +26,17 @@ const (
 	detailFull     detailLevel = "full"
 )
 
-var allowedIncludes = map[string]struct{}{
+var metricIncludes = map[string]struct{}{
 	"labels": {}, "query": {}, "runbook": {}, "related": {},
 	"caveats": {}, "provenance": {},
+}
+
+var logIncludes = map[string]struct{}{
+	"fields": {}, "query": {}, "runbook": {}, "caveats": {}, "provenance": {},
+}
+
+var traceIncludes = map[string]struct{}{
+	"query": {}, "runbook": {}, "caveats": {}, "downstream": {}, "provenance": {},
 }
 
 var allowedRoles = map[string]struct{}{
@@ -57,6 +65,12 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/context/metrics", a.handleList)
 	mux.HandleFunc("GET /api/v1/context/metrics/{name}", a.handleMetric)
 	mux.HandleFunc("GET /api/v1/context/services/{service}", a.handleService)
+	mux.HandleFunc("GET /api/v1/context/logs", a.handleLogs)
+	mux.HandleFunc("GET /api/v1/context/logs/{id}", a.handleLog)
+	mux.HandleFunc("GET /api/v1/context/traces", a.handleTraces)
+	mux.HandleFunc("GET /api/v1/context/traces/{id}", a.handleTrace)
+	mux.HandleFunc("GET /api/v1/context/coverage", a.handleCoverage)
+	mux.HandleFunc("GET /.well-known/skopos.json", a.handleWellKnown)
 }
 
 type metricResponse struct {
@@ -124,7 +138,7 @@ func (a *API) handleIndex(w http.ResponseWriter, r *http.Request) {
 		"api":           "/api/v1/context",
 		"detail_levels": []string{string(detailMinimal), string(detailStandard), string(detailFull)},
 		"include":       []string{"labels", "query", "runbook", "related", "caveats", "provenance"},
-		"signals":       []string{"metrics", "services"},
+		"signals":       []string{"metrics", "services", "logs", "traces"},
 	})
 }
 
@@ -135,7 +149,7 @@ func (a *API) handleMetric(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	include, err := parseInclude(r.URL.Query().Get("include"))
+	include, err := parseInclude(r.URL.Query().Get("include"), metricIncludes)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -282,6 +296,287 @@ func (a *API) handleService(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type logResponse struct {
+	Schema      string            `json:"schema"`
+	ID          string            `json:"id"`
+	Known       bool              `json:"known"`
+	Service     string            `json:"service,omitempty"`
+	Event       string            `json:"event,omitempty"`
+	Description string            `json:"description,omitempty"`
+	Severity    []string          `json:"severity,omitempty"`
+	Flags       []string          `json:"flags,omitempty"`
+	Sources     []string          `json:"sources,omitempty"`
+	Query       string            `json:"query,omitempty"`
+	Runbook     string            `json:"runbook,omitempty"`
+	Fields      map[string]string `json:"fields,omitempty"`
+	Caveats     []string          `json:"caveats,omitempty"`
+	Provenance  []provenance      `json:"provenance,omitempty"`
+}
+
+type traceResponse struct {
+	Schema       string       `json:"schema"`
+	ID           string       `json:"id"`
+	Known        bool         `json:"known"`
+	Service      string       `json:"service,omitempty"`
+	Operation    string       `json:"operation,omitempty"`
+	Kind         string       `json:"kind,omitempty"`
+	CriticalPath bool         `json:"critical_path,omitempty"`
+	Description  string       `json:"description,omitempty"`
+	Flags        []string     `json:"flags,omitempty"`
+	Sources      []string     `json:"sources,omitempty"`
+	Query        string       `json:"query,omitempty"`
+	Runbook      string       `json:"runbook,omitempty"`
+	Downstream   []string     `json:"downstream,omitempty"`
+	Caveats      []string     `json:"caveats,omitempty"`
+	Provenance   []provenance `json:"provenance,omitempty"`
+}
+
+type logListItem struct {
+	ID       string   `json:"id"`
+	Service  string   `json:"service,omitempty"`
+	Event    string   `json:"event,omitempty"`
+	Severity []string `json:"severity,omitempty"`
+	Flags    []string `json:"flags,omitempty"`
+}
+
+type traceListItem struct {
+	ID           string   `json:"id"`
+	Service      string   `json:"service,omitempty"`
+	Operation    string   `json:"operation,omitempty"`
+	Kind         string   `json:"kind,omitempty"`
+	CriticalPath bool     `json:"critical_path,omitempty"`
+	Flags        []string `json:"flags,omitempty"`
+}
+
+type logListResponse struct {
+	Schema  string        `json:"schema"`
+	Version string        `json:"version"`
+	Items   []logListItem `json:"items"`
+	Total   int           `json:"total"`
+	HasMore bool          `json:"has_more,omitempty"`
+}
+
+type traceListResponse struct {
+	Schema  string          `json:"schema"`
+	Version string          `json:"version"`
+	Items   []traceListItem `json:"items"`
+	Total   int             `json:"total"`
+	HasMore bool            `json:"has_more,omitempty"`
+}
+
+type signalCoverage struct {
+	Documented int `json:"documented"`
+}
+
+type coverageResponse struct {
+	Schema   string         `json:"schema"`
+	Version  string         `json:"version"`
+	Metrics  signalCoverage `json:"metrics"`
+	Services signalCoverage `json:"services"`
+	Logs     signalCoverage `json:"logs"`
+	Traces   signalCoverage `json:"traces"`
+}
+
+func (a *API) handleLogs(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	limit, err := parseLimit(r.URL.Query().Get("limit"), defaultListLimit, maxListLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ids := make([]string, 0, len(a.Catalog.Logs))
+	for id, log := range a.Catalog.Logs {
+		if service != "" && log.Service != service {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	total := len(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	items := make([]logListItem, 0, len(ids))
+	for _, id := range ids {
+		log := a.Catalog.Logs[id]
+		items = append(items, logListItem{
+			ID: id, Service: log.Service, Event: log.Event,
+			Severity: append([]string(nil), log.Severity...),
+			Flags:    append([]string(nil), log.Flags...),
+		})
+	}
+	writeJSON(w, r, a.Catalog.Version, logListResponse{
+		Schema: SchemaVersion, Version: a.Catalog.Version,
+		Items: items, Total: total, HasMore: total > len(items),
+	})
+}
+
+func (a *API) handleLog(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	detail, err := parseDetail(r.URL.Query().Get("detail"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	include, err := parseInclude(r.URL.Query().Get("include"), logIncludes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	log, known := a.Catalog.Logs[id]
+	if !known {
+		writeJSON(w, r, a.Catalog.Version, logResponse{
+			Schema: SchemaVersion, ID: id, Known: false,
+			Flags: []string{"missing_context"},
+		})
+		return
+	}
+	out := logResponse{
+		Schema: SchemaVersion, ID: id, Known: true,
+		Service: log.Service, Event: log.Event, Description: log.Description,
+		Severity: append([]string(nil), log.Severity...),
+		Flags:    append([]string(nil), log.Flags...),
+		Sources:  []string{"catalog"},
+	}
+	if detail == detailStandard || detail == detailFull {
+		out.Query = log.Query
+		out.Runbook = log.Runbook
+		out.Fields = cloneLabels(log.Fields)
+	}
+	if detail == detailFull {
+		out.Caveats = append([]string(nil), log.Caveats...)
+		out.Provenance = []provenance{{Source: "catalog", Confidence: 1}}
+	}
+	if _, ok := include["query"]; ok {
+		out.Query = log.Query
+	}
+	if _, ok := include["runbook"]; ok {
+		out.Runbook = log.Runbook
+	}
+	if _, ok := include["fields"]; ok {
+		out.Fields = cloneLabels(log.Fields)
+	}
+	if _, ok := include["caveats"]; ok {
+		out.Caveats = append([]string(nil), log.Caveats...)
+	}
+	if _, ok := include["provenance"]; ok {
+		out.Provenance = []provenance{{Source: "catalog", Confidence: 1}}
+	}
+	writeJSON(w, r, a.Catalog.Version, out)
+}
+
+func (a *API) handleTraces(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	limit, err := parseLimit(r.URL.Query().Get("limit"), defaultListLimit, maxListLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	ids := make([]string, 0, len(a.Catalog.Traces))
+	for id, trace := range a.Catalog.Traces {
+		if service != "" && trace.Service != service {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	total := len(ids)
+	if len(ids) > limit {
+		ids = ids[:limit]
+	}
+	items := make([]traceListItem, 0, len(ids))
+	for _, id := range ids {
+		trace := a.Catalog.Traces[id]
+		items = append(items, traceListItem{
+			ID: id, Service: trace.Service, Operation: trace.Operation,
+			Kind: trace.Kind, CriticalPath: trace.CriticalPath,
+			Flags: append([]string(nil), trace.Flags...),
+		})
+	}
+	writeJSON(w, r, a.Catalog.Version, traceListResponse{
+		Schema: SchemaVersion, Version: a.Catalog.Version,
+		Items: items, Total: total, HasMore: total > len(items),
+	})
+}
+
+func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	detail, err := parseDetail(r.URL.Query().Get("detail"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	include, err := parseInclude(r.URL.Query().Get("include"), traceIncludes)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	trace, known := a.Catalog.Traces[id]
+	if !known {
+		writeJSON(w, r, a.Catalog.Version, traceResponse{
+			Schema: SchemaVersion, ID: id, Known: false,
+			Flags: []string{"missing_context"},
+		})
+		return
+	}
+	out := traceResponse{
+		Schema: SchemaVersion, ID: id, Known: true,
+		Service: trace.Service, Operation: trace.Operation, Kind: trace.Kind,
+		CriticalPath: trace.CriticalPath, Description: trace.Description,
+		Flags:   append([]string(nil), trace.Flags...),
+		Sources: []string{"catalog"},
+	}
+	if detail == detailStandard || detail == detailFull {
+		out.Query = trace.Query
+		out.Runbook = trace.Runbook
+		out.Downstream = append([]string(nil), trace.Downstream...)
+	}
+	if detail == detailFull {
+		out.Caveats = append([]string(nil), trace.Caveats...)
+		out.Provenance = []provenance{{Source: "catalog", Confidence: 1}}
+	}
+	if _, ok := include["query"]; ok {
+		out.Query = trace.Query
+	}
+	if _, ok := include["runbook"]; ok {
+		out.Runbook = trace.Runbook
+	}
+	if _, ok := include["downstream"]; ok {
+		out.Downstream = append([]string(nil), trace.Downstream...)
+	}
+	if _, ok := include["caveats"]; ok {
+		out.Caveats = append([]string(nil), trace.Caveats...)
+	}
+	if _, ok := include["provenance"]; ok {
+		out.Provenance = []provenance{{Source: "catalog", Confidence: 1}}
+	}
+	writeJSON(w, r, a.Catalog.Version, out)
+}
+
+func (a *API) handleCoverage(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, r, a.Catalog.Version, coverageResponse{
+		Schema: SchemaVersion, Version: a.Catalog.Version,
+		Metrics:  signalCoverage{Documented: len(a.Catalog.Metrics)},
+		Services: signalCoverage{Documented: len(a.Catalog.Services)},
+		Logs:     signalCoverage{Documented: len(a.Catalog.Logs)},
+		Traces:   signalCoverage{Documented: len(a.Catalog.Traces)},
+	})
+}
+
+func (a *API) handleWellKnown(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, r, a.Catalog.Version, map[string]any{
+		"schema":        "skopos.well-known/v1",
+		"name":          "skopos",
+		"version":       a.Catalog.Version,
+		"context_api":   "/api/v1/context",
+		"signals":       []string{"metrics", "services", "logs", "traces"},
+		"detail_levels": []string{string(detailMinimal), string(detailStandard), string(detailFull)},
+		"query_apis": map[string]string{
+			"prometheus": "/api/v1", "loki": "/loki/api/v1", "tempo": "/api",
+		},
+	})
+}
+
 func parseDetail(raw string) (detailLevel, error) {
 	if raw == "" {
 		return detailMinimal, nil
@@ -294,14 +589,14 @@ func parseDetail(raw string) (detailLevel, error) {
 	}
 }
 
-func parseInclude(raw string) (map[string]struct{}, error) {
+func parseInclude(raw string, allowed map[string]struct{}) (map[string]struct{}, error) {
 	out := make(map[string]struct{})
 	for _, part := range strings.Split(raw, ",") {
 		part = strings.TrimSpace(part)
 		if part == "" {
 			continue
 		}
-		if _, ok := allowedIncludes[part]; !ok {
+		if _, ok := allowed[part]; !ok {
 			return nil, fmt.Errorf("invalid include %q", part)
 		}
 		out[part] = struct{}{}

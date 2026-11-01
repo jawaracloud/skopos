@@ -45,6 +45,33 @@ const validCatalogJSON = `{
       "logs": ["checkout error logs"],
       "traces": ["GET /checkout"]
     }
+  },
+  "logs": {
+    "checkout.error": {
+      "description": "Checkout errors",
+      "service": "checkout",
+      "event": "exception",
+      "severity": ["ERROR", "FATAL"],
+      "query": "{service_name=\"checkout\"} | json | level=\"error\"",
+      "runbook": "https://runbooks.example.com/checkout/errors",
+      "fields": {"level": "log level"},
+      "caveats": ["Sampled errors"],
+      "flags": ["slo_metric"]
+    }
+  },
+  "traces": {
+    "checkout.get": {
+      "description": "Checkout request path",
+      "service": "checkout",
+      "operation": "GET /checkout",
+      "kind": "server",
+      "critical_path": true,
+      "downstream": ["payments"],
+      "query": "{ resource.service.name = \"checkout\" }",
+      "runbook": "https://runbooks.example.com/checkout",
+      "caveats": ["Sampled traces"],
+      "flags": ["slo_metric"]
+    }
   }
 }`
 
@@ -62,8 +89,8 @@ func TestParseValid(t *testing.T) {
 	if catalog.Schema != SchemaVersion || catalog.Version != "2026-11-01.1" {
 		t.Fatalf("catalog header = %#v", catalog)
 	}
-	if len(catalog.Metrics) != 2 || len(catalog.Services) != 1 {
-		t.Fatalf("catalog size = %d/%d", len(catalog.Metrics), len(catalog.Services))
+	if len(catalog.Metrics) != 2 || len(catalog.Services) != 1 || len(catalog.Logs) != 1 || len(catalog.Traces) != 1 {
+		t.Fatalf("catalog size = %d/%d/%d/%d", len(catalog.Metrics), len(catalog.Services), len(catalog.Logs), len(catalog.Traces))
 	}
 	if catalog.Metrics["demo_temperature_celsius"].Owner != "platform" {
 		t.Fatalf("metric = %#v", catalog.Metrics["demo_temperature_celsius"])
@@ -137,6 +164,12 @@ func TestParseRejectsInvalidCatalog(t *testing.T) {
 		{"missing service ref", `{"schema":"ctx/v1","version":"v1","metrics":{"m":{"description":"x","type":"gauge","unit":"1","role":"resource","direction":"neutral","service":"missing"}}}`, "service"},
 		{"service missing description", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"metrics":[]}}}`, "description"},
 		{"service missing metric", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"description":"x","metrics":["missing"]}}}`, "not in the catalog"},
+		{"invalid log id", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"description":"x"}},"logs":{"bad id":{"description":"x","service":"checkout"}}}`, "log context id"},
+		{"log missing service", `{"schema":"ctx/v1","version":"v1","logs":{"checkout.error":{"description":"x","service":"missing"}}}`, "service"},
+		{"invalid severity", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"description":"x"}},"logs":{"checkout.error":{"description":"x","service":"checkout","severity":["LOUD"]}}}`, "severity"},
+		{"invalid trace kind", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"description":"x"}},"traces":{"checkout.get":{"description":"x","service":"checkout","operation":"GET /checkout","kind":"weird"}}}`, "kind"},
+		{"trace missing operation", `{"schema":"ctx/v1","version":"v1","services":{"checkout":{"description":"x"}},"traces":{"checkout.get":{"description":"x","service":"checkout"}}}`, "operation"},
+		{"trace missing service", `{"schema":"ctx/v1","version":"v1","traces":{"checkout.get":{"description":"x","service":"missing","operation":"GET /checkout"}}}`, "service"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
