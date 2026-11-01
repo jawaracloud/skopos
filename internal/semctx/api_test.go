@@ -487,6 +487,54 @@ func TestContextSuggestions(t *testing.T) {
 	}
 }
 
+type fakeSignalObserver struct {
+	logs      []ObservedLog
+	traces    []ObservedTrace
+	logsErr   error
+	tracesErr error
+}
+
+func (f *fakeSignalObserver) ListObservedLogs(context.Context) ([]ObservedLog, error) {
+	return f.logs, f.logsErr
+}
+
+func (f *fakeSignalObserver) ListObservedTraces(context.Context) ([]ObservedTrace, error) {
+	return f.traces, f.tracesErr
+}
+
+func TestObservedLogTraceCoverage(t *testing.T) {
+	signals := &fakeSignalObserver{
+		logs: []ObservedLog{
+			{Service: "checkout", Event: "exception", Count: 10},
+			{Service: "checkout", Event: "timeout", Count: 2},
+		},
+		traces: []ObservedTrace{
+			{Service: "checkout", Operation: "GET /checkout", Count: 10},
+			{Service: "checkout", Operation: "SELECT orders", Count: 5},
+		},
+	}
+	mux := http.NewServeMux()
+	NewAPI(mustCatalog(t)).WithSignalObserver(signals).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true&min=0.8"))
+	observed := body["observed"].(map[string]any)
+	if observed["logs"] != float64(2) || observed["traces"] != float64(2) {
+		t.Fatalf("observed = %v", observed)
+	}
+	alerts := body["alerts"].([]any)
+	if len(alerts) != 2 {
+		t.Fatalf("alerts = %v", alerts)
+	}
+
+	signals.logsErr = errors.New("logs down")
+	signals.tracesErr = errors.New("traces down")
+	body = decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true"))
+	observed = body["observed"].(map[string]any)
+	flags := observed["flags"].([]any)
+	if !containsString(flags, "observed_logs_unavailable") || !containsString(flags, "observed_traces_unavailable") {
+		t.Fatalf("flags = %v", flags)
+	}
+}
+
 func TestCoverageAlerts(t *testing.T) {
 	observer := &fakeObserver{items: []ObservedMetric{
 		{Name: "observed_metric_total", Type: "counter", Unit: "requests"},
