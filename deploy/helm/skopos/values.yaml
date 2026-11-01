@@ -177,10 +177,8 @@ gateway:
     type: ClusterIP
     port: 8080
   config:
-    maxExecutionTime: 30s
-    maxMemoryUsage: 1073741824
-    maxRowsToRead: 10000000
-    maxResultRows: 100000
+    # ClickHouse query limits live under clickhouse.limits so the gateway
+    # client and the read-only ClickHouse user cannot drift apart.
     maxResponseBytes: 67108864
     readinessTimeout: 2s
     maxRequestBytes: 1048576

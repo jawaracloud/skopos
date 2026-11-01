@@ -171,6 +171,10 @@ func TestEmitRejectsInvalidPlans(t *testing.T) {
 		want   string
 	}{
 		{"unknown table", func(q *plan.Query) { q.Table = "otel_secrets" }, "unknown table"},
+		{"signal mismatch", func(q *plan.Query) {
+			q.Signal = plan.SignalLogs
+		}, "does not match"},
+		{"unknown signal", func(q *plan.Query) { q.Signal = "profiles" }, "unknown signal"},
 		{"unknown column", func(q *plan.Query) { q.Select[0].Expr = plan.Col("Password") }, "unknown column"},
 		{"empty select", func(q *plan.Query) { q.Select = nil }, "select list is empty"},
 		{"duplicate alias", func(q *plan.Query) {
@@ -182,6 +186,9 @@ func TestEmitRejectsInvalidPlans(t *testing.T) {
 		{"invalid alias", func(q *plan.Query) { q.Select[0].Alias = "value; DROP TABLE" }, "invalid alias"},
 		{"unknown function", func(q *plan.Query) {
 			q.Select[0].Expr = plan.F("systemCommand", plan.Col("Value"))
+		}, "unsupported function"},
+		{"lambda function without lambda IR", func(q *plan.Query) {
+			q.Select[0].Expr = plan.F("arrayMap", plan.Col("Value"))
 		}, "unsupported function"},
 		{"unknown aggregate", func(q *plan.Query) {
 			q.Select[0].Expr = plan.Agg("secretAgg", plan.Col("Value"))

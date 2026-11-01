@@ -83,6 +83,7 @@ func run() error {
 		"clickhouse_url", redactURL(cfg.ClickHouseURL),
 		"database", cfg.ClickHouseDatabase,
 		"read_only_user", cfg.ClickHouseUser,
+		"tables", cfg.Tables,
 	)
 
 	errCh := make(chan error, 1)

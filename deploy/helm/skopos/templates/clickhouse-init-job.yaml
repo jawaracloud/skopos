@@ -59,10 +59,12 @@ spec:
 
               cli --multiquery < /schema/schema.sql
 
-              cli --query "CREATE USER IF NOT EXISTS ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY '${SKOPOS_GATEWAY_PASSWORD}' SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
-              cli --query "ALTER USER ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY '${SKOPOS_GATEWAY_PASSWORD}' SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
+              cli --param_password="$SKOPOS_GATEWAY_PASSWORD" --query "CREATE USER IF NOT EXISTS ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY {password:String} SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
+              cli --param_password="$SKOPOS_GATEWAY_PASSWORD" --query "ALTER USER ${SKOPOS_GATEWAY_USER} IDENTIFIED WITH sha256_password BY {password:String} SETTINGS readonly = 2, max_execution_time = ${SKOPOS_MAX_EXECUTION_TIME}, max_memory_usage = ${SKOPOS_MAX_MEMORY_USAGE}, max_rows_to_read = ${SKOPOS_MAX_ROWS_TO_READ}, max_result_rows = ${SKOPOS_MAX_RESULT_ROWS}"
               cli --query "GRANT SELECT ON \`${SKOPOS_DATABASE}\`.* TO ${SKOPOS_GATEWAY_USER}"
           env:
+            - name: TZ
+              value: UTC
             - name: CLICKHOUSE_HOST
               value: {{ include "skopos.clickhouse.host" . | quote }}
             - name: CLICKHOUSE_ADMIN_USER

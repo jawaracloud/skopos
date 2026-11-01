@@ -704,32 +704,12 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "maxExecutionTime",
-            "maxMemoryUsage",
-            "maxRowsToRead",
-            "maxResultRows",
             "maxResponseBytes",
             "readinessTimeout",
             "maxRequestBytes",
             "logLevel"
           ],
           "properties": {
-            "maxExecutionTime": {
-              "type": "string",
-              "pattern": "^[0-9]+(ms|s|m|h)$"
-            },
-            "maxMemoryUsage": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "maxRowsToRead": {
-              "type": "integer",
-              "minimum": 1
-            },
-            "maxResultRows": {
-              "type": "integer",
-              "minimum": 1
-            },
             "maxResponseBytes": {
               "type": "integer",
               "minimum": 1

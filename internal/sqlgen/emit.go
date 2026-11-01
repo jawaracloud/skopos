@@ -67,9 +67,17 @@ func New(schema *plan.Schema, limits Limits) (*Emitter, error) {
 
 // Emit renders q as a SELECT statement.
 func (e *Emitter) Emit(q plan.Query) (Result, error) {
+	switch q.Signal {
+	case "", plan.SignalMetrics, plan.SignalLogs, plan.SignalTraces:
+	default:
+		return Result{}, fmt.Errorf("sqlgen: unknown signal %q", q.Signal)
+	}
 	table, ok := e.schema.Table(q.Table)
 	if !ok {
 		return Result{}, fmt.Errorf("sqlgen: unknown table %q", q.Table)
+	}
+	if q.Signal != "" && table.Signal != "" && q.Signal != table.Signal {
+		return Result{}, fmt.Errorf("sqlgen: signal %q does not match table %q signal %q", q.Signal, q.Table, table.Signal)
 	}
 	if len(q.Select) == 0 {
 		return Result{}, errors.New("sqlgen: select list is empty")
@@ -282,19 +290,21 @@ func (r *renderer) reference(name string) (string, error) {
 }
 
 func (r *renderer) addGenerated(p plan.Param) (string, error) {
-	if err := plan.ValidateParamValue(p); err != nil {
-		return "", err
-	}
-	if _, exists := r.seen[p.Name]; exists {
-		return "", fmt.Errorf("sqlgen: duplicate parameter %q", p.Name)
-	}
-	r.seen[p.Name] = struct{}{}
-	r.params = append(r.params, p)
-	return placeholder(p), nil
+	return r.addParam(p, true)
 }
 
 func (r *renderer) addUser(p plan.Param) (string, error) {
-	if err := plan.ValidateParam(p); err != nil {
+	return r.addParam(p, false)
+}
+
+func (r *renderer) addParam(p plan.Param, generated bool) (string, error) {
+	var err error
+	if generated {
+		err = plan.ValidateParamValue(p)
+	} else {
+		err = plan.ValidateParam(p)
+	}
+	if err != nil {
 		return "", err
 	}
 	if _, exists := r.seen[p.Name]; exists {
@@ -530,9 +540,9 @@ var scalarFunctions = map[string]struct{}{
 	"toStartOfHour": {}, "toStartOfDay": {}, "formatDateTime": {},
 	"lower": {}, "upper": {}, "match": {}, "hasToken": {}, "has": {},
 	"mapContains": {}, "mapKeys": {}, "mapValues": {}, "arrayJoin": {},
-	"arrayExists": {}, "arrayFilter": {}, "arrayMap": {}, "arraySum": {},
-	"arrayCount": {}, "arrayConcat": {}, "length": {}, "if": {}, "multiIf": {},
-	"coalesce": {}, "greatest": {}, "least": {}, "abs": {}, "round": {},
+	"arraySum": {}, "arrayCount": {}, "arrayConcat": {}, "length": {},
+	"if": {}, "multiIf": {}, "coalesce": {}, "greatest": {}, "least": {},
+	"abs": {}, "round": {},
 	"floor": {}, "ceil": {}, "log": {}, "exp": {}, "sqrt": {}, "pow": {},
 	"now": {}, "today": {},
 }

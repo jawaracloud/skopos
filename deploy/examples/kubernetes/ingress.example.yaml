@@ -1,0 +1,34 @@
+# EXAMPLE ONLY. Skopos v0.1 has no built-in authentication. Do not apply this
+# without an authenticating proxy, TLS, and rate limiting in front of the
+# gateway. The default NetworkPolicy allows pods from any namespace to reach
+# the gateway; tighten networkPolicy.gateway.allowFrom before exposing it.
+#
+# The service name assumes a release named "skopos" in the "observability"
+# namespace. Change it if you used different values.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skopos-gateway
+  namespace: observability
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Add authentication here, for example:
+    # nginx.ingress.kubernetes.io/auth-url: "https://auth.example.com/oauth2/auth"
+    # nginx.ingress.kubernetes.io/auth-signin: "https://auth.example.com/oauth2/start?rd=$scheme://$host$request_uri"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - skopos.example.com
+      secretName: skopos-gateway-tls
+  rules:
+    - host: skopos.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: skopos-gateway
+                port:
+                  number: 8080

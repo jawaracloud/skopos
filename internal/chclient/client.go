@@ -257,7 +257,11 @@ func (c *Client) Query(ctx context.Context, sql string, params []plan.Param) (*R
 
 	seen := make(map[string]struct{}, len(params))
 	for _, p := range params {
-		if err := plan.ValidateParam(p); err != nil {
+		// The emitter reserves the "__" prefix for generated parameters such
+		// as __start, __end, and __limit. Validate types and values here; the
+		// plan builders are responsible for rejecting user-supplied reserved
+		// names.
+		if err := plan.ValidateParamValue(p); err != nil {
 			return nil, fmt.Errorf("chclient: parameter: %w", err)
 		}
 		if _, exists := seen[p.Name]; exists {
@@ -279,7 +283,7 @@ func (c *Client) Query(ctx context.Context, sql string, params []plan.Param) (*R
 	}
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	req.Header.Set("Accept", "application/json")
-	req.Header.Set("User-Agent", "skopos-gateway/0.1.0")
+	req.Header.Set("User-Agent", "skopos-gateway")
 	if c.user != "" || c.password != "" {
 		req.SetBasicAuth(c.user, c.password)
 	}
@@ -468,9 +472,93 @@ func isReadOnlySQL(sql string) bool {
 				return false
 			}
 			keyword := strings.ToUpper(s[:i])
-			return keyword == "SELECT" || keyword == "WITH"
+			if keyword != "SELECT" && keyword != "WITH" {
+				return false
+			}
+			return !containsWriteKeyword(s)
 		}
 	}
+}
+
+var writeKeywords = map[string]struct{}{
+	"INSERT": {}, "ALTER": {}, "DROP": {}, "CREATE": {}, "TRUNCATE": {},
+	"RENAME": {}, "ATTACH": {}, "DETACH": {}, "OPTIMIZE": {}, "GRANT": {},
+	"REVOKE": {}, "KILL": {}, "EXCHANGE": {}, "MOVE": {}, "UNDROP": {},
+	"DELETE": {}, "UPDATE": {},
+}
+
+// containsWriteKeyword scans tokens outside strings, quoted identifiers, and
+// comments. It is a defence-in-depth check on top of the read-only ClickHouse
+// user; it is not a full SQL parser.
+func containsWriteKeyword(sql string) bool {
+	for i := 0; i < len(sql); {
+		switch sql[i] {
+		case '\'':
+			i = skipQuoted(sql, i, '\'')
+		case '"':
+			i = skipQuoted(sql, i, '"')
+		case '`':
+			i = skipQuoted(sql, i, '`')
+		case '-':
+			if i+1 < len(sql) && sql[i+1] == '-' {
+				if n := strings.IndexByte(sql[i+2:], '\n'); n >= 0 {
+					i += 2 + n + 1
+				} else {
+					return false
+				}
+			} else {
+				i++
+			}
+		case '/':
+			if i+1 < len(sql) && sql[i+1] == '*' {
+				if n := strings.Index(sql[i+2:], "*/"); n >= 0 {
+					i += 2 + n + 2
+				} else {
+					return false
+				}
+			} else {
+				i++
+			}
+		default:
+			if isWordStart(sql[i]) {
+				start := i
+				for i < len(sql) && isWordPart(sql[i]) {
+					i++
+				}
+				if _, ok := writeKeywords[strings.ToUpper(sql[start:i])]; ok {
+					return true
+				}
+				continue
+			}
+			i++
+		}
+	}
+	return false
+}
+
+func skipQuoted(s string, start int, quote byte) int {
+	for i := start + 1; i < len(s); i++ {
+		if s[i] == '\\' {
+			i++
+			continue
+		}
+		if s[i] == quote {
+			if quote != '`' && i+1 < len(s) && s[i+1] == quote {
+				i++
+				continue
+			}
+			return i + 1
+		}
+	}
+	return len(s)
+}
+
+func isWordStart(b byte) bool {
+	return (b >= 'A' && b <= 'Z') || (b >= 'a' && b <= 'z') || b == '_'
+}
+
+func isWordPart(b byte) bool {
+	return isWordStart(b) || (b >= '0' && b <= '9')
 }
 
 var codePattern = regexp.MustCompile(`(?i)code:\s*([0-9]+)`)

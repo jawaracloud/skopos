@@ -58,12 +58,13 @@ New seams need agreement in the PR description before tests are written.
 4. Run the focused test, then the full package tests.
 5. Refactor only after the test is green.
 
-Run `make check` before opening a PR. Integration tests require a ClickHouse
-HTTP endpoint:
+Run `make check` before opening a PR. It includes a short SQL emitter fuzz run;
+CI runs the same fuzz target as a blocking gate. Integration tests require a
+ClickHouse HTTP endpoint:
 
 ```sh
 docker run --rm -d --name skopos-clickhouse -p 8123:8123 -p 9000:9000 \
-  clickhouse/clickhouse-server:26.8.36.3
+  clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
 CLICKHOUSE_URL=http://127.0.0.1:8123 make test-integration
 ```
 

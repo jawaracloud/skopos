@@ -39,7 +39,9 @@ spec:
             allowPrivilegeEscalation: {{ .Values.obi.securityContext.allowPrivilegeEscalation }}
             capabilities:
               drop:
-                - ALL
+                {{- range .Values.obi.securityContext.capabilities.drop }}
+                - {{ . }}
+                {{- end }}
               add:
                 {{- $caps := .Values.obi.securityContext.capabilities.add }}
                 {{- if .Values.obi.contextPropagation }}

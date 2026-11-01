@@ -2,11 +2,12 @@ SHELL := /bin/sh
 
 GO ?= go
 HELM ?= helm
+GOVULNCHECK ?= govulncheck
 VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build test test-race test-integration fuzz vet helm-lint helm-template check clean
+.PHONY: help build test test-race test-integration fuzz vet vuln helm-lint helm-template check clean
 
 help:
 	@printf '%s\n' \
@@ -16,6 +17,7 @@ help:
 		'test-integration  run integration tests (requires CLICKHOUSE_URL)' \
 		'fuzz              run the SQL emitter fuzz target for 30s' \
 		'vet               run go vet' \
+		'vuln              build the gateway and run govulncheck in binary mode' \
 		'helm-lint         lint the Helm chart' \
 		'helm-template     render the Helm chart' \
 		'check             vet + test + helm lint'
@@ -40,13 +42,17 @@ fuzz:
 vet:
 	$(GO) vet ./...
 
+vuln:
+	$(GO) build -o /tmp/skopos-gateway ./cmd/gateway
+	$(GOVULNCHECK) -mode=binary /tmp/skopos-gateway
+
 helm-lint:
 	$(HELM) lint $(CHART)
 
 helm-template:
 	$(HELM) template skopos $(CHART) --namespace observability
 
-check: vet test helm-lint
+check: vet test helm-lint fuzz
 
 clean:
 	rm -rf bin

@@ -53,13 +53,14 @@ The important values are:
 | Value | Default | Meaning |
 | --- | --- | --- |
 | `clickhouse.database` | `otel` | Database name. Validated as an SQL identifier. |
-| `clickhouse.tables.*` | `otel_*` | Table names. Validated as SQL identifiers. |
+| `clickhouse.tables.*` | `otel_*` | Table names used by the DDL, Collector, and gateway. Validated as SQL identifiers. |
 | `clickhouse.ttl.tracesDays` | `7` | Trace and trace-lookup TTL in days. |
 | `clickhouse.ttl.logsDays` | `7` | Log TTL in days. |
 | `clickhouse.ttl.metricsDays` | `30` | Metrics TTL in days. |
 | `clickhouse.persistence.size` | `50Gi` | PVC request. |
 | `clickhouse.persistence.storageClass` | `""` | Empty uses the cluster default. |
-| `clickhouse.limits.*` | see `values.yaml` | Gateway user limits in ClickHouse. |
+| `clickhouse.limits.*` | see `values.yaml` | Gateway user limits in ClickHouse, also used by the gateway client. |
+| `clickhouse.ttl.*` | see `values.yaml` | Table TTLs. The chart keeps ClickHouse and the init client in UTC. |
 | `gateway.image.digest` | `""` | Release images must set this. |
 | `networkPolicy.enabled` | `true` | Component ingress NetworkPolicies. |
 | `networkPolicy.gateway.allowFrom` | `[{namespaceSelector: {}}]` | Namespace/label selectors allowed to reach the gateway. Empty means no ingress. Tighten this to your Grafana namespace. |
@@ -80,6 +81,14 @@ directory.
 
 The datasources will return connection or 404 errors until M3–M5 implement the
 query endpoints. The example is included so the wiring can be reviewed early.
+
+## Ingress example
+
+`deploy/examples/kubernetes/ingress.example.yaml` is a starting point for an
+ingress that points at the gateway Service. It is not part of the chart and it
+is intentionally not secure by itself: v0.1 has no authentication. Add an
+authenticating proxy, TLS, and rate limiting before applying it, and tighten
+`networkPolicy.gateway.allowFrom` to the ingress controller namespace.
 
 ## TTL, PVC, and disk-full behavior
 

@@ -28,6 +28,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.ClickHouseDatabase != "otel" {
 		t.Errorf("ClickHouseDatabase = %q", cfg.ClickHouseDatabase)
 	}
+	if cfg.Tables.Traces != "otel_traces" || cfg.Tables.MetricsSummary != "otel_metrics_summary" {
+		t.Errorf("Tables = %#v", cfg.Tables)
+	}
 	if cfg.MaxExecutionTime != 30*time.Second {
 		t.Errorf("MaxExecutionTime = %s", cfg.MaxExecutionTime)
 	}
@@ -46,6 +49,8 @@ func TestOverrides(t *testing.T) {
 		"SKOPOS_CLICKHOUSE_DATABASE":           "observability",
 		"SKOPOS_CLICKHOUSE_USER":               "gateway",
 		"SKOPOS_CLICKHOUSE_PASSWORD":           "secret",
+		"SKOPOS_TABLE_TRACES":                  "custom_traces",
+		"SKOPOS_TABLE_METRICS_SUMMARY":         "custom_summary",
 		"SKOPOS_CLICKHOUSE_MAX_EXECUTION_TIME": "45s",
 		"SKOPOS_CLICKHOUSE_MAX_MEMORY_USAGE":   "2048",
 		"SKOPOS_CLICKHOUSE_MAX_ROWS_TO_READ":   "3000",
@@ -61,6 +66,9 @@ func TestOverrides(t *testing.T) {
 	if cfg.ListenAddr != "127.0.0.1:9090" || cfg.ClickHouseDatabase != "observability" ||
 		cfg.ClickHouseUser != "gateway" || cfg.ClickHousePassword != "secret" {
 		t.Fatalf("unexpected config: %#v", cfg)
+	}
+	if cfg.Tables.Traces != "custom_traces" || cfg.Tables.MetricsSummary != "custom_summary" {
+		t.Fatalf("Tables = %#v", cfg.Tables)
 	}
 	if cfg.MaxExecutionTime != 45*time.Second || cfg.MaxMemoryUsage != 2048 ||
 		cfg.MaxRowsToRead != 3000 || cfg.MaxResultRows != 4000 || cfg.MaxResponseBytes != 5000 {
@@ -86,6 +94,7 @@ func TestInvalidValues(t *testing.T) {
 		{"rows", "SKOPOS_CLICKHOUSE_MAX_ROWS_TO_READ", "many", "SKOPOS_CLICKHOUSE_MAX_ROWS_TO_READ"},
 		{"log level", "SKOPOS_LOG_LEVEL", "verbose", "SKOPOS_LOG_LEVEL"},
 		{"database", "SKOPOS_CLICKHOUSE_DATABASE", "bad-name", "SKOPOS_CLICKHOUSE_DATABASE"},
+		{"table", "SKOPOS_TABLE_TRACES", "bad-name", "SKOPOS_TABLE_TRACES"},
 		{"empty listen", "SKOPOS_LISTEN_ADDR", "", "SKOPOS_LISTEN_ADDR"},
 	}
 	for _, tc := range tests {

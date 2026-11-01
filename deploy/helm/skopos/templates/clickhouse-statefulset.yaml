@@ -50,6 +50,11 @@ spec:
                   key: admin-password
             - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
               value: "1"
+            # The exporter stores time as epoch-based DateTime/DateTime64 values.
+            # Keeping the server and client in UTC makes parameterized ranges
+            # unambiguous.
+            - name: TZ
+              value: UTC
             {{- with .Values.clickhouse.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}

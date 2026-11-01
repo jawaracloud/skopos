@@ -20,6 +20,7 @@ const (
 // Table is a whitelisted ClickHouse table and its columns.
 type Table struct {
 	Name    string
+	Signal  Signal
 	Columns map[string]ColumnType
 }
 
@@ -108,11 +109,11 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"StatusMessage":      ColumnString,
 				"Events.Timestamp":   ColumnDateTime,
 				"Events.Name":        ColumnString,
-				"Events.Attributes":  ColumnMap,
+				"Events.Attributes":  ColumnArray,
 				"Links.TraceId":      ColumnString,
 				"Links.SpanId":       ColumnString,
 				"Links.TraceState":   ColumnString,
-				"Links.Attributes":   ColumnMap,
+				"Links.Attributes":   ColumnArray,
 			},
 		},
 		names.Traces + "_trace_id_ts": {
@@ -154,7 +155,7 @@ func DefaultSchema(database string, names TableNames) *Schema {
 		},
 		names.MetricsGauge: {
 			Name:    names.MetricsGauge,
-			Columns: metricColumns(map[string]ColumnType{"Value": ColumnNumber}),
+			Columns: metricColumns(map[string]ColumnType{"Value": ColumnNumber}, true),
 		},
 		names.MetricsSum: {
 			Name: names.MetricsSum,
@@ -162,7 +163,7 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"Value":                  ColumnNumber,
 				"AggregationTemporality": ColumnNumber,
 				"IsMonotonic":            ColumnBool,
-			}),
+			}, true),
 		},
 		names.MetricsHistogram: {
 			Name: names.MetricsHistogram,
@@ -174,7 +175,7 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"Min":                    ColumnNumber,
 				"Max":                    ColumnNumber,
 				"AggregationTemporality": ColumnNumber,
-			}),
+			}, true),
 		},
 		names.MetricsExponentialHistogram: {
 			Name: names.MetricsExponentialHistogram,
@@ -190,7 +191,7 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"Min":                    ColumnNumber,
 				"Max":                    ColumnNumber,
 				"AggregationTemporality": ColumnNumber,
-			}),
+			}, true),
 		},
 		names.MetricsSummary: {
 			Name: names.MetricsSummary,
@@ -199,34 +200,50 @@ func DefaultSchema(database string, names TableNames) *Schema {
 				"Sum":                       ColumnNumber,
 				"ValueAtQuantiles.Quantile": ColumnNumber,
 				"ValueAtQuantiles.Value":    ColumnNumber,
-			}),
+			}, false),
 		},
+	}
+	for name, signal := range map[string]Signal{
+		names.Traces:                      SignalTraces,
+		names.Traces + "_trace_id_ts":     SignalTraces,
+		names.Logs:                        SignalLogs,
+		names.MetricsGauge:                SignalMetrics,
+		names.MetricsSum:                  SignalMetrics,
+		names.MetricsHistogram:            SignalMetrics,
+		names.MetricsExponentialHistogram: SignalMetrics,
+		names.MetricsSummary:              SignalMetrics,
+	} {
+		t := tables[name]
+		t.Signal = signal
+		tables[name] = t
 	}
 	return &Schema{Database: database, Tables: tables}
 }
 
-func metricColumns(extra map[string]ColumnType) map[string]ColumnType {
+func metricColumns(extra map[string]ColumnType, exemplars bool) map[string]ColumnType {
 	cols := map[string]ColumnType{
-		"ResourceAttributes":           ColumnMap,
-		"ResourceSchemaUrl":            ColumnString,
-		"ScopeName":                    ColumnString,
-		"ScopeVersion":                 ColumnString,
-		"ScopeAttributes":              ColumnMap,
-		"ScopeDroppedAttrCount":        ColumnNumber,
-		"ScopeSchemaUrl":               ColumnString,
-		"ServiceName":                  ColumnString,
-		"MetricName":                   ColumnString,
-		"MetricDescription":            ColumnString,
-		"MetricUnit":                   ColumnString,
-		"Attributes":                   ColumnMap,
-		"StartTimeUnix":                ColumnDateTime,
-		"TimeUnix":                     ColumnDateTime,
-		"Flags":                        ColumnNumber,
-		"Exemplars.FilteredAttributes": ColumnMap,
-		"Exemplars.TimeUnix":           ColumnDateTime,
-		"Exemplars.Value":              ColumnNumber,
-		"Exemplars.SpanId":             ColumnString,
-		"Exemplars.TraceId":            ColumnString,
+		"ResourceAttributes":    ColumnMap,
+		"ResourceSchemaUrl":     ColumnString,
+		"ScopeName":             ColumnString,
+		"ScopeVersion":          ColumnString,
+		"ScopeAttributes":       ColumnMap,
+		"ScopeDroppedAttrCount": ColumnNumber,
+		"ScopeSchemaUrl":        ColumnString,
+		"ServiceName":           ColumnString,
+		"MetricName":            ColumnString,
+		"MetricDescription":     ColumnString,
+		"MetricUnit":            ColumnString,
+		"Attributes":            ColumnMap,
+		"StartTimeUnix":         ColumnDateTime,
+		"TimeUnix":              ColumnDateTime,
+		"Flags":                 ColumnNumber,
+	}
+	if exemplars {
+		cols["Exemplars.FilteredAttributes"] = ColumnMap
+		cols["Exemplars.TimeUnix"] = ColumnDateTime
+		cols["Exemplars.Value"] = ColumnNumber
+		cols["Exemplars.SpanId"] = ColumnString
+		cols["Exemplars.TraceId"] = ColumnString
 	}
 	for k, v := range extra {
 		cols[k] = v

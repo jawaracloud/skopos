@@ -33,10 +33,17 @@ jobs:
         run: go test ./...
       - name: Race detector
         run: go test -race ./...
+      - name: SQL emitter fuzz gate
+        run: go test -run='^$' -fuzz=FuzzEmitNoUserValueLeak -fuzztime=30s ./internal/sqlgen
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
-      - name: govulncheck
-        run: "$(go env GOPATH)/bin/govulncheck ./..."
+      - name: Build gateway for vulnerability scan
+        run: go build -o /tmp/skopos-gateway ./cmd/gateway
+      - name: govulncheck (binary mode)
+        # v1.1.4's source-mode SSA panics on Go 1.27. Binary mode checks the
+        # modules actually linked into the gateway. Revisit when a release
+        # supports Go 1.27 source analysis.
+        run: "$(go env GOPATH)/bin/govulncheck" -mode=binary /tmp/skopos-gateway
 
   integration:
     name: ClickHouse integration

@@ -10,10 +10,12 @@ empty or incorrect result.
 | --- | --- | --- | --- | --- |
 | Metrics | OBI -> Collector OTLP -> ClickHouse | `otel_metrics_gauge`, `_sum`, `_histogram`, `_exponential_histogram`, `_summary` | Not implemented (M3 PromQL) | Alpha |
 | Traces | OBI -> Collector OTLP -> ClickHouse | `otel_traces`, `otel_traces_trace_id_ts` | Not implemented (M4 TraceQL) | Alpha |
-| Logs | Collector OTLP/filelog pipeline (receiver not enabled by default) | `otel_logs` | Not implemented (M5 LogQL) | Alpha |
+| Logs | Collector OTLP receiver (enabled); filelog receiver not bundled | `otel_logs` | Not implemented (M5 LogQL) | Alpha |
 
-OBI does not emit logs. The default chart has no log receiver. Enabling one
-requires verifying the receiver component and its maturity first.
+OBI does not emit logs. The default chart accepts logs through the Collector's
+OTLP receiver, as verified in the k3d smoke test. A filelog receiver is not
+bundled; enabling one requires verifying the receiver component and its maturity
+first.
 
 ## Gateway endpoints
 

@@ -19,6 +19,7 @@ type Config struct {
 	ClickHouseDatabase string
 	ClickHouseUser     string
 	ClickHousePassword string
+	Tables             plan.TableNames
 	MaxExecutionTime   time.Duration
 	MaxMemoryUsage     uint64
 	MaxRowsToRead      uint64
@@ -42,6 +43,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		ClickHouseURL:      "http://127.0.0.1:8123",
 		ClickHouseDatabase: "otel",
 		ClickHouseUser:     "default",
+		Tables:             plan.DefaultTableNames(),
 		MaxExecutionTime:   30 * time.Second,
 		MaxMemoryUsage:     1 << 30,
 		MaxRowsToRead:      10_000_000,
@@ -66,6 +68,27 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ClickHousePassword, err = stringEnv(lookup, "SKOPOS_CLICKHOUSE_PASSWORD", cfg.ClickHousePassword); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.Traces, err = tableEnv(lookup, "SKOPOS_TABLE_TRACES", cfg.Tables.Traces); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.Logs, err = tableEnv(lookup, "SKOPOS_TABLE_LOGS", cfg.Tables.Logs); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.MetricsGauge, err = tableEnv(lookup, "SKOPOS_TABLE_METRICS_GAUGE", cfg.Tables.MetricsGauge); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.MetricsSum, err = tableEnv(lookup, "SKOPOS_TABLE_METRICS_SUM", cfg.Tables.MetricsSum); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.MetricsHistogram, err = tableEnv(lookup, "SKOPOS_TABLE_METRICS_HISTOGRAM", cfg.Tables.MetricsHistogram); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.MetricsExponentialHistogram, err = tableEnv(lookup, "SKOPOS_TABLE_METRICS_EXPONENTIAL_HISTOGRAM", cfg.Tables.MetricsExponentialHistogram); err != nil {
+		return Config{}, err
+	}
+	if cfg.Tables.MetricsSummary, err = tableEnv(lookup, "SKOPOS_TABLE_METRICS_SUMMARY", cfg.Tables.MetricsSummary); err != nil {
 		return Config{}, err
 	}
 	if cfg.MaxExecutionTime, err = durationEnv(lookup, "SKOPOS_CLICKHOUSE_MAX_EXECUTION_TIME", cfg.MaxExecutionTime); err != nil {
@@ -130,6 +153,17 @@ func stringEnv(lookup func(string) (string, bool), key, fallback string) (string
 		return v, nil
 	}
 	return fallback, nil
+}
+
+func tableEnv(lookup func(string) (string, bool), key, fallback string) (string, error) {
+	v, err := stringEnv(lookup, key, fallback)
+	if err != nil {
+		return "", err
+	}
+	if !plan.ValidIdent(v) {
+		return "", fmt.Errorf("%s: invalid table identifier %q", key, v)
+	}
+	return v, nil
 }
 
 func durationEnv(lookup func(string) (string, bool), key string, fallback time.Duration) (time.Duration, error) {

@@ -52,10 +52,10 @@ Kubernetes cluster
 +------------------------------------------------------------------+
 ```
 
-OBI emits metrics and traces. Logs enter through a separate Collector
-pipeline (for example a filelog receiver); the receiver must be verified before
-it is enabled. The gateway never stores or accepts telemetry. It only reads
-from ClickHouse.
+OBI emits metrics and traces. Logs can arrive over OTLP through the Collector,
+or through a separate log pipeline (for example a filelog receiver); a filelog
+receiver must be verified before it is enabled. The gateway never stores or
+accepts telemetry. It only reads from ClickHouse.
 
 ## Quick start
 

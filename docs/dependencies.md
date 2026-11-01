@@ -28,7 +28,7 @@ These tools are not linked into the gateway binary:
 | --- | --- | --- |
 | Go | 1.27.x | Build and test |
 | Helm | 3.19+ or 4.x | Chart lint and render |
-| govulncheck | v1.1.4 | Vulnerability scan |
+| govulncheck | v1.1.4 | Vulnerability scan (binary mode; see note below) |
 | Docker | any current release | ClickHouse integration tests |
 
 ## Pinned container images
@@ -66,3 +66,9 @@ implemented in the M0–M2 scaffold:
 - A separate, reviewed dependency and image version-bump workflow.
 - `govulncheck` and module checksum verification as blocking CI gates (the
   current CI runs both).
+
+`govulncheck` v1.1.4 is the latest available release, but its source-mode SSA
+analysis panics on Go 1.27 (`*ast.KeyValueExpr`). CI therefore builds the
+gateway and runs `govulncheck -mode=binary`. This checks the modules actually
+linked into the gateway. Move back to source mode when a govulncheck release
+supports Go 1.27 source analysis.

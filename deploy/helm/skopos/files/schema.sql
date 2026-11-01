@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_scope_attr_value mapValues(ScopeAttributes) TYPE text(tokenizer = 'array'),
     INDEX idx_log_attr_key mapKeys(LogAttributes) TYPE text(tokenizer = 'array'),
     INDEX idx_log_attr_value mapValues(LogAttributes) TYPE text(tokenizer = 'array'),
-    INDEX idx_lower_body lower(Body) TYPE text(tokenizer = 'splitByNonAlpha')
+    INDEX idx_lower_body lower(Body) TYPE text(tokenizer = 'splitByNonAlpha'),
+    INDEX idx_event_name EventName TYPE bloom_filter(0.01) GRANULARITY 1
 ) ENGINE = MergeTree()
 PARTITION BY toDate(Timestamp)
 ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)

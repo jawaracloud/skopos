@@ -141,6 +141,8 @@ func TestQueryRejectsWriteStatements(t *testing.T) {
 		"CREATE TABLE x (a UInt8) ENGINE = Memory",
 		"SYSTEM FLUSH LOGS",
 		"TRUNCATE TABLE otel.otel_logs",
+		"WITH x AS (SELECT 1) INSERT INTO otel.otel_logs SELECT * FROM x",
+		"WITH x AS (SELECT 1) DELETE FROM otel.otel_logs WHERE 1",
 		"",
 	} {
 		if _, err := c.Query(context.Background(), sql, nil); err == nil {
@@ -163,6 +165,9 @@ func TestQueryAcceptsReadStatementsWithComments(t *testing.T) {
 		"/* comment */ SELECT 1",
 		"-- comment\nSELECT 1",
 		"WITH x AS (SELECT 1) SELECT * FROM x",
+		"SELECT 'insert into x' AS s",
+		"SELECT `insert` FROM system.tables LIMIT 1",
+		"SELECT 1 /* DROP TABLE x */",
 	} {
 		if _, err := c.Query(context.Background(), sql, nil); err != nil {
 			t.Errorf("Query(%q): %v", sql, err)
@@ -200,6 +205,21 @@ func TestQueryResponseLimit(t *testing.T) {
 	_, err := c.Query(context.Background(), "SELECT 1", nil)
 	if err == nil || !strings.Contains(err.Error(), "response exceeds") {
 		t.Fatalf("error = %v, want response limit error", err)
+	}
+}
+
+func TestQueryAcceptsGeneratedReservedParameters(t *testing.T) {
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("param___start"); got != "2026-11-01 00:00:00.000000000" {
+			t.Errorf("param___start = %q", got)
+		}
+		_, _ = io.WriteString(w, `{"meta":[],"data":[]}`)
+	}), nil)
+	_, err := c.Query(context.Background(), "SELECT 1 WHERE x = {__start:DateTime64(9)}", []plan.Param{
+		plan.Time("__start", time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)),
+	})
+	if err != nil {
+		t.Fatalf("Query: %v", err)
 	}
 }
 
