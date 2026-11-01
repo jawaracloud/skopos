@@ -26,6 +26,7 @@ the receiver component and its maturity first.
 | Tempo `/api/*` and `/api/v2/*` | Implemented alpha | [traceql-support.md](traceql-support.md) |
 | Loki `/loki/api/v1/*` | Implemented alpha | [logql-support.md](logql-support.md) |
 | Health `/healthz`, `/readyz`, `/version` | Implemented | — |
+| Context `/api/v1/context/*` | Implemented alpha (optional catalog) | [ai-context.md](ai-context.md) |
 
 The gateway exposes all three APIs on one public port. The Grafana datasource
 example points all three datasource types at that service.

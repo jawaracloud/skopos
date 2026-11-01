@@ -13,6 +13,16 @@ auth:
   username: ""
   password: ""
 
+# Optional semantic context catalog served at /api/v1/context. The catalog is
+# operator-authored JSON; no metric metadata is inferred by the gateway.
+context:
+  enabled: false
+  # Preferred: an existing ConfigMap with a catalog.json key.
+  existingConfigMap: ""
+  # Inline catalog JSON. Rendered into a ConfigMap when existingConfigMap is
+  # empty. Keep it small; the API returns compact projections.
+  catalog: ""
+
 # ClickHouse single-node. HA and replication are out of scope for v0.1.
 clickhouse:
   image:

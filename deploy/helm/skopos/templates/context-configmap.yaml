@@ -1,0 +1,12 @@
+{{- if and .Values.context.enabled (not .Values.context.existingConfigMap) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "skopos.context.configMapName" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: context
+data:
+  catalog.json: |-
+{{ .Values.context.catalog | nindent 4 }}
+{{- end }}

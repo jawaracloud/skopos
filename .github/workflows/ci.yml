@@ -158,6 +158,15 @@ jobs:
           grep -q 'SKOPOS_AUTH_ENABLED' /tmp/skopos-auth.yaml
           grep -q 'SKOPOS_AUTH_USERNAME' /tmp/skopos-auth.yaml
           grep -q 'name: skopos-auth' /tmp/skopos-auth.yaml
+      - name: Render AI context catalog
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set context.enabled=true \
+            --set-file context.catalog=deploy/examples/context/catalog.json \
+            > /tmp/skopos-context.yaml
+          grep -q 'SKOPOS_CONTEXT_FILE' /tmp/skopos-context.yaml
+          grep -q 'name: skopos-context' /tmp/skopos-context.yaml
+          grep -q 'catalog.json' /tmp/skopos-context.yaml
       - name: Render tiered storage and backup
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
