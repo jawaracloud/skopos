@@ -61,7 +61,7 @@ The pre-merge baseline was **4.1** at commit
 `0d6841772f61b13585dfc42fc9115a53e76f7aec`. After the distributed, S3,
 full-text, and OpenSSF changes were merged, actions were pinned, and the
 repository became public, the official action reports **7.8** at commit
-`2e52d36` (run `41282988303`, published 2026-11-01T06:59:59Z). The number is a
+`27cc5eb` (run `41286275750`, published 2026-11-01T07:49:03Z). The number is a
 diagnostic, not a badge.
 
 | Check | Score | What the latest run found | Evidence / next action |
@@ -77,11 +77,11 @@ diagnostic, not a badge.
 | Fuzzing | 10 | Project is fuzzed. | `FuzzEmitNoUserValueLeak` runs as a blocking 30-second CI gate in `internal/sqlgen`. |
 | License | 10 | License file detected. | Apache-2.0 in `LICENSE`; the README license section is consistent. |
 | Maintained | 0 | Repository was created within the last 90 days. | This is a repository-age warning, not evidence of abandonment. Keep weekly activity; the check should improve as the repository ages. |
-| Packaging | -1 | No packaging workflow detected. | `release.yml` builds artifacts, but no image, chart, or GitHub release has been published. Publish the alpha image/chart and create a release. |
+| Packaging | -1 | No supported packaging workflow detected. | The Helm chart is published and a chart release exists, but the gateway image is not published to GHCR and there is no language/package-manager release yet. Publish the image and wire the release artifact path. |
 | Pinned-Dependencies | 10 | All GitHub Actions and container images are pinned by commit SHA or digest. | `ci.yml`, `release.yml`, and the Scorecard workflow are SHA-pinned; the chart images are digest-pinned. Re-check after every action bump. |
 | SAST | 10 | SAST runs on all commits. | Default CodeQL setup for Go was enabled on 2026-11-01; the first analysis and the PR #1 analysis passed. `go vet`, `govulncheck`, and the fuzz gate also run. |
 | Security-Policy | 10 | Security policy file detected and linked. | `SECURITY.md` links the private advisory form and states response targets; private vulnerability reporting is enabled. |
-| Signed-Releases | -1 | No releases found. | Release signing is scaffolded but optional and unused. Publish a release and attach signatures (`.sig`, `.sigstore`, or `.intoto.jsonl`); see [release.md](release.md). |
+| Signed-Releases | 8 | 1/1 chart releases has a signed artifact. | The chart-release workflow keyless-signs `skopos-0.1.0-alpha.1.tgz` and uploads `.sig` and `.pem`. The image release still needs signing and SBOM/provenance for full supply-chain coverage. |
 | Token-Permissions | 10 | Workflow tokens follow least privilege. | `release.yml` keeps `contents: read` at the top level and scopes write permissions to the release job. `ci.yml` and the Scorecard workflow are read-only or scoped. |
 | Vulnerabilities | 8 | OSV reports `GO-2026-6860` and `GO-2026-6866` for `golang.org/x/net` v0.60.0. | The module is present in `go.sum` but not in `vendor/modules.txt`; `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). The fixed version is `golang.org/x/net` v0.62.0; update it in a separate human-reviewed dependency PR. |
 | Webhooks | N/A | No repository webhooks configured. | Verified with the repository hooks API on 2026-11-01. Re-check if a webhook is added; it must use a secret. |
