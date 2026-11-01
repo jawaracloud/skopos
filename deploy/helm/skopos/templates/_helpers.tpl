@@ -64,6 +64,14 @@ app.kubernetes.io/component: {{ $component }}
 {{- printf "%s-gateway" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "skopos.frontend.fullname" -}}
+{{- printf "%s-frontend" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "skopos.query.fullname" -}}
+{{- printf "%s-query" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
 {{- define "skopos.clickhouseInit.fullname" -}}
 {{- printf "%s-clickhouse-init" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}

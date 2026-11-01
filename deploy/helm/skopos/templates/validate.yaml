@@ -1,6 +1,9 @@
 {{- if and .Values.obi.enabled (not .Values.collector.enabled) }}
 {{- fail "obi.enabled=true requires collector.enabled=true" }}
 {{- end }}
+{{- if and .Values.distributed.enabled (not .Values.gateway.enabled) }}
+{{- fail "distributed.enabled=true requires gateway.enabled=true" }}
+{{- end }}
 {{- if and .Values.obi.enabled (not .Values.obi.serviceAccount.create) (not .Values.obi.serviceAccount.name) }}
 {{- fail "obi.enabled=true requires obi.serviceAccount.create=true or obi.serviceAccount.name" }}
 {{- end }}

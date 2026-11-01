@@ -1,4 +1,4 @@
-{{- if .Values.gateway.enabled }}
+{{- if and .Values.gateway.enabled (not .Values.distributed.enabled) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -46,6 +46,8 @@ spec:
               containerPort: {{ .Values.gateway.service.port }}
               protocol: TCP
           env:
+            - name: SKOPOS_MODE
+              value: {{ .Values.gateway.mode | quote }}
             - name: SKOPOS_LISTEN_ADDR
               value: ":{{ .Values.gateway.service.port }}"
             - name: SKOPOS_CLICKHOUSE_URL
