@@ -111,7 +111,8 @@ Prerequisites:
 - Helm 3.19+ or Helm 4.
 - A default StorageClass, or set `clickhouse.persistence.storageClass`.
 
-The gateway image is not published yet. For a data-plane-only install:
+The gateway image is not published yet. For a data-plane-only install from the
+local chart:
 
 ```sh
 helm install skopos ./deploy/helm/skopos \
@@ -119,6 +120,21 @@ helm install skopos ./deploy/helm/skopos \
   --create-namespace \
   --set gateway.enabled=false
 ```
+
+Or install from the published Helm chart repository:
+
+```sh
+helm repo add skopos https://jawaracloud.github.io/skopos/
+helm repo update
+helm install skopos skopos/skopos \
+  --devel \
+  --namespace observability \
+  --create-namespace \
+  --set gateway.enabled=false
+```
+
+See [docs/chart-repository.md](docs/chart-repository.md) for chart versioning and
+the release flow.
 
 To build and run the gateway locally:
 
@@ -216,6 +232,7 @@ gateway to the internet without TLS and an authenticating edge. See
 - [ADR 0002: distributed read path](docs/adr/0002-distributed-read-path.md)
 - [Installation and operations](docs/install.md)
 - [Tiered storage and backups](docs/storage.md)
+- [Helm chart repository](docs/chart-repository.md)
 - [Support matrix](docs/support-matrix.md)
 - [Beta gate status](docs/beta-gates.md)
 - [PromQL support](docs/promql-support.md)

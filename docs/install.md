@@ -24,7 +24,20 @@
 
 ## Install the data plane
 
-The gateway image is not published yet. Install the data plane first:
+The chart is published at `https://jawaracloud.github.io/skopos/`. The gateway
+image is not published yet, so install the data plane first:
+
+```sh
+helm repo add skopos https://jawaracloud.github.io/skopos/
+helm repo update
+helm install skopos skopos/skopos \
+  --devel \
+  --namespace observability \
+  --create-namespace \
+  --set gateway.enabled=false
+```
+
+Or install from a local checkout:
 
 ```sh
 helm install skopos ./deploy/helm/skopos \

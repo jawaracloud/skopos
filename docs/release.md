@@ -54,6 +54,24 @@ Manual runs use **Actions -> release -> Run workflow** with a version and an
 optional push flag. A manual run without `push` still produces downloadable
 artifacts, so maintainers can inspect a release before publishing.
 
+## Helm chart repository publishing
+
+Chart publishing is independent of the image release tag. On every push to
+`main`, `.github/workflows/chart-repo.yml` packages the chart, creates the chart
+release, and updates the `gh-pages` index. Chart-releaser skips an unchanged
+`Chart.yaml` version, so bump `version` in `deploy/helm/skopos/Chart.yaml` to
+publish a new chart.
+
+The repository is:
+
+```text
+https://jawaracloud.github.io/skopos/
+```
+
+Do not edit `gh-pages` manually; see
+[chart-repository.md](chart-repository.md) for the consumer commands and the
+versioning flow.
+
 ## Optional signing
 
 Signing is off by default. To enable it, set the repository variable
