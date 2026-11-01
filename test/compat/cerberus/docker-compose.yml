@@ -54,7 +54,7 @@ services:
     command:
       - "--storage.tsdb.path=/prometheus"
       - "--config.file=/etc/prometheus/prometheus.yml"
-      - "--storage.tsdb.retention.time=10y"
+      - "--storage.tsdb.retention.time=20000d"
     ports:
       - "127.0.0.1:${CERBERUS_COMPAT_PROMETHEUS_PORT:-18093}:9090"
 

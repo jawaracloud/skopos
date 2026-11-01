@@ -128,9 +128,9 @@ func (s *seeder) applySchema(ctx context.Context, path string) error {
 		"{{ .Values.clickhouse.tables.metricsHistogram }}", "otel_metrics_histogram",
 		"{{ .Values.clickhouse.tables.metricsExponentialHistogram }}", "otel_metrics_exponential_histogram",
 		"{{ .Values.clickhouse.tables.metricsSummary }}", "otel_metrics_summary",
-		"{{ .Values.clickhouse.ttl.tracesDays }}", "7",
-		"{{ .Values.clickhouse.ttl.logsDays }}", "7",
-		"{{ .Values.clickhouse.ttl.metricsDays }}", "30",
+		"{{ .Values.clickhouse.ttl.tracesDays }}", "20000",
+		"{{ .Values.clickhouse.ttl.logsDays }}", "20000",
+		"{{ .Values.clickhouse.ttl.metricsDays }}", "20000",
 	).Replace(string(raw))
 	if strings.Contains(rendered, "{{") {
 		return fmt.Errorf("schema still contains Helm placeholders after rendering")

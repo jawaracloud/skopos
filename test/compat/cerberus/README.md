@@ -80,7 +80,10 @@ read the summary table; they are recorded as a cerberus gap below.
 The metrics fixture is generated from `metrics.json` into two identical
 datasets: rows in the OTel ClickHouse tables (`otel_metrics_gauge`,
 `otel_metrics_sum`, `otel_metrics_histogram`, `otel_metrics_summary`) and an
-OpenMetrics file imported into a real Prometheus TSDB. The OTel histogram
+OpenMetrics file imported into a real Prometheus TSDB. The corpus uses the fixed
+base time `2026-11-01T00:00:00Z`; the test rendering of `schema.sql` uses a
+55-year TTL and Prometheus retention is also 55 years, so the deterministic
+timestamps do not age out of the store in later CI runs. The OTel histogram
 `BucketCounts` column is per-bucket; the OpenMetrics writer accumulates it into
 Prometheus `_bucket` series. This distinction was a corpus bug in the first
 draft of this harness: the gateways correctly reconstructed cumulative buckets
