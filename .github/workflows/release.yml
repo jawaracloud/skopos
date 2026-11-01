@@ -1,0 +1,108 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version without the leading v (for example 0.1.0-alpha.1)"
+        required: true
+        type: string
+      push:
+        description: "Push the gateway image to GHCR"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  GO_VERSION: "1.27.x"
+  HELM_VERSION: "v3.22.1"
+  SYFT_VERSION: "v1.55.0"
+  COSIGN_VERSION: "v3.1.4"
+
+jobs:
+  release:
+    name: Build, package, and optionally sign
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          check-latest: true
+
+      - uses: azure/setup-helm@v5
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Resolve version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          VERSION="${VERSION#v}"
+          case "$VERSION" in
+            ''|*[!0-9A-Za-z_.+-]*) echo "invalid version: $VERSION" >&2; exit 1 ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "releasing $VERSION"
+
+      - name: Log in to GHCR
+        if: github.event_name == 'push' || inputs.push
+        uses: docker/login-action@v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download syft
+        uses: anchore/sbom-action/download-syft@v0.24.3
+        with:
+          syft-version: ${{ env.SYFT_VERSION }}
+
+      - name: Install cosign
+        if: vars.COSIGN_SIGNING == 'true'
+        uses: sigstore/cosign-installer@v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Build release artifacts
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/skopos-gateway
+          PUSH: ${{ (github.event_name == 'push' || inputs.push) && '1' || '0' }}
+          SIGN: ${{ vars.COSIGN_SIGNING == 'true' && '1' || '0' }}
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          if [ -n "${COSIGN_PRIVATE_KEY:-}" ]; then
+            printf '%s' "$COSIGN_PRIVATE_KEY" > "$RUNNER_TEMP/cosign.key"
+            export COSIGN_KEY="$RUNNER_TEMP/cosign.key"
+          fi
+          ./scripts/release.sh
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@v7.0.2
+        with:
+          name: skopos-release-${{ steps.version.outputs.version }}
+          path: dist/release/*
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" dist/release/* --generate-notes --title "$GITHUB_REF_NAME"

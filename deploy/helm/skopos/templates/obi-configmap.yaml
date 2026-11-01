@@ -14,6 +14,11 @@ data:
     propagator: {}
 
     tracer_provider:
+      # Config v2 falls back to a parent-based always-off sampler when
+      # tracer_provider is present without an explicit sampler. OBI then emits
+      # metrics but no traces, so always-on is required for the alpha chart.
+      sampler:
+        always_on: {}
       processors:
         - batch:
             exporter:
