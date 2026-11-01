@@ -55,7 +55,7 @@ update, change the version and all four platform checksums together.
 `.github/workflows/scorecard.yml` runs weekly and on manual dispatch. It grants
 only read permissions (`contents`, `issues`, `pull-requests`, `checks`) and
 pins `actions/checkout` and `actions/upload-artifact` by commit SHA. The JSON
-artifact is retained for 30 days. It does not publish results to the public
+artifact is retained for 1 day (the repository artifact-retention limit on the current plan). It does not publish results to the public
 Scorecard API.
 
 The official action path, once GHAS is available:
@@ -68,39 +68,39 @@ The official action path, once GHAS is available:
 That job uses `publish_results: false` and keeps results private. A badge must
 not be added until a public, published Scorecard result exists.
 
-## Snapshot: 2026-11-01
+## Snapshots
 
-This is a real CLI run, not an estimate. It scanned the remote default branch at
-commit `0d6841772f61b13585dfc42fc9115a53e76f7aec` with Scorecard v5.6.0. The
-worktree changes in this branch were not merged at scan time, so the rows that
-depend on them (Dependabot, Security-Policy, Token-Permissions) need a fresh run
-after merge.
+The pre-merge baseline was **4.1** at commit `0d6841772f61b13585dfc42fc9115a53e76f7aec`.
+After the distributed, S3, full-text, and OpenSSF changes were merged and the
+workflow actions were pinned, the same pinned CLI reports **6.5** at commit
+`4391dbb` (workflow run `41281845302`). Both numbers are diagnostics, not a
+badge.
 
-| Check | Score | What the run found | Evidence / next action |
+| Check | Score | What the latest run found | Evidence / next action |
 | --- | --- | --- | --- |
 | Binary-Artifacts | 10 | No binaries found. | `bin/` and `dist/` are git-ignored; the Docker build produces the binary outside the source tree. |
 | Branch-Protection | 0 | Branch protection not enabled on `main`. | The GitHub API returns 403: "Upgrade to GitHub Pro or make this repository public to enable this feature." A Free private repository has no branch protection or rulesets. A maintainer must make the repository public or upgrade the plan, then protect `main` (require PRs, one review, status checks, no force push). |
 | CI-Tests | -1 | No pull request found. | The project currently commits directly to `main`. Once changes go through PRs, Scorecard can evaluate CI on PRs. |
 | CII-Best-Practices | 0 | No OpenSSF Best Practices badge effort detected. | The application draft is in [openssf-best-practices.md](openssf-best-practices.md). The `repo_public` criterion is not met while the repository is private, so a badge cannot be awarded yet. |
-| Code-Review | 0 | 0/23 approved changesets. | Agent commits were pushed directly to `main`. Require PRs and at least one human approval; this also unblocks CI-Tests and part of Branch-Protection. |
+| Code-Review | 0 | 0/30 approved changesets. | Agent commits were pushed directly to `main`. Require PRs and at least one human approval; this also unblocks CI-Tests and part of Branch-Protection. |
 | Contributors | 10 | Five contributing organizations detected. | Informational; derived from commit metadata. Keep commit identities accurate. |
 | Dangerous-Workflow | 10 | No dangerous workflow patterns. | Workflows do not use `pull_request_target` with untrusted checkout, script injection, or similar patterns. Re-check after workflow changes. |
-| Dependency-Update-Tool | 0 | No update tool detected. | `.github/dependabot.yml` now covers the root Go module, `test/compat/prometheus`, `test/e2e/obi/app`, and GitHub Actions. Re-run after this branch merges; the score should update once Dependabot is detected. |
+| Dependency-Update-Tool | 10 | Dependabot detected. | `.github/dependabot.yml` covers the root Go module, `test/compat/prometheus`, `test/e2e/obi/app`, and GitHub Actions. |
 | Fuzzing | 10 | Project is fuzzed. | `FuzzEmitNoUserValueLeak` runs as a blocking 30-second CI gate in `internal/sqlgen`. |
 | License | 10 | License file detected. | Apache-2.0 in `LICENSE`; the README license section is consistent. |
 | Maintained | 0 | Repository was created within the last 90 days. | This is a repository-age warning, not evidence of abandonment. Keep weekly activity; the check should improve as the repository ages. |
 | Packaging | -1 | No packaging workflow detected. | `release.yml` builds artifacts, but no image, chart, or GitHub release has been published. Publish the alpha image/chart and create a release. |
-| Pinned-Dependencies | 2 | 0/11 GitHub-owned and 0/5 third-party actions pinned; 2/2 container images pinned. | The new Scorecard workflows pin every action by commit SHA, and the Dockerfile base image is digest-pinned. Existing `ci.yml` and `release.yml` still use version tags; pinning them is a follow-up because this workstream was asked not to rewrite those workflows. |
+| Pinned-Dependencies | 10 | All GitHub Actions and container images are pinned by commit SHA or digest. | `ci.yml`, `release.yml`, and both Scorecard workflows are SHA-pinned; the chart images are digest-pinned. Re-check after every action bump. |
 | SAST | 0 | No SAST tool detected. | `go vet`, `govulncheck`, and the fuzz gate run, but Scorecard does not recognize them as SAST. CodeQL requires GHAS on a private repository. A free alternative such as `gosec` or `staticcheck` would need review and a new CI job; it is not added here. |
-| Security-Policy | 4 | `SECURITY.md` detected; no linked content found. | `SECURITY.md` now links the private advisory form and states response targets. Re-run to confirm the score improves. The original file had no URL or email for Scorecard to link. |
+| Security-Policy | 10 | Security policy file detected and linked. | `SECURITY.md` links the private advisory form and states response targets. |
 | Signed-Releases | -1 | No releases found. | Release signing is scaffolded but optional and unused. Publish a release and attach signatures (`.sig`, `.sigstore`, or `.intoto.jsonl`); see [release.md](release.md). |
-| Token-Permissions | 0 | Top-level `contents: write` and `packages: write` in `release.yml`. | This branch moves the writes to job level and keeps top-level `contents: read`. Re-run to confirm. `ci.yml` already uses a top-level read-only token. |
-| Vulnerabilities | 8 | OSV reports `GO-2026-6860` and `GO-2026-6866` for `golang.org/x/net` v0.60.0. | The module is present in `go.sum` but not in `vendor/modules.txt`; `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). The fixed version is `golang.org/x/net` v0.62.0; update it in a separate human-reviewed dependency PR (the contract for this workstream forbids `go.mod`/`go.sum` edits). |
+| Token-Permissions | 10 | Workflow tokens follow least privilege. | `release.yml` keeps `contents: read` at the top level and scopes write permissions to the release job. `ci.yml` and the Scorecard workflows are read-only. |
+| Vulnerabilities | 8 | OSV reports `GO-2026-6860` and `GO-2026-6866` for `golang.org/x/net` v0.60.0. | The module is present in `go.sum` but not in `vendor/modules.txt`; `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). The fixed version is `golang.org/x/net` v0.62.0; update it in a separate human-reviewed dependency PR. |
 | Webhooks | N/A | No repository webhooks configured. | Verified with the repository hooks API on 2026-11-01. Re-check if a webhook is added; it must use a secret. |
 
-The overall CLI score at that snapshot was **4.1**. It is a diagnostic number,
-not a badge, and it will change after the findings above are addressed. Do not
-quote it as a security rating.
+The current CLI score is **6.5**. It is a diagnostic number, not a badge, and it
+will change after the findings above are addressed. Do not quote it as a
+security rating.
 
 ## What a maintainer must do manually
 

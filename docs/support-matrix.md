@@ -99,5 +99,5 @@ with the beta test matrix.
   remain beta gates; see [beta-gates.md](beta-gates.md).
 - The OBI e2e and release signing/publishing are manual because they need
   privileged eBPF or project credentials; normal CI covers build, unit,
-  integration, fuzz, Helm, PromQL oracle, Tempo/Loki references, and the
-  cerberus three-way gate.
+  integration, fuzz, Helm, PromQL oracle, Tempo/Loki references, the cerberus
+  three-way gate, and the S3/RustFS test. OpenSSF Scorecard runs weekly.
