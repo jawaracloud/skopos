@@ -3,6 +3,7 @@ package httpapi
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -11,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jawaracloud/skopos/internal/auth"
 )
 
 type fakePinger struct {
@@ -153,6 +156,43 @@ func TestNotFoundAndMethodNotAllowed(t *testing.T) {
 	rec = doRequest(t, h, http.MethodHead, "/healthz")
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("head status = %d", rec.Code)
+	}
+}
+
+func TestBasicAuth(t *testing.T) {
+	guard, err := auth.New("viewer", "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newTestServer(t, fakePinger{}, func(cfg *Config) { cfg.Auth = guard })
+	h := s.Handler()
+
+	for _, path := range []string{"/healthz", "/readyz"} {
+		rec := doRequest(t, h, http.MethodGet, path)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s bypass status = %d", path, rec.Code)
+		}
+	}
+
+	rec := doRequest(t, h, http.MethodGet, "/version")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("version without auth status = %d", rec.Code)
+	}
+	if rec.Header().Get("WWW-Authenticate") == "" {
+		t.Fatal("missing WWW-Authenticate")
+	}
+
+	rec = doRequest(t, h, http.MethodGet, "/api/v1/query")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("query without auth status = %d", rec.Code)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/version", nil)
+	req.Header.Set("Authorization", "Basic "+base64.StdEncoding.EncodeToString([]byte("viewer:secret")))
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("version with auth status = %d", rec.Code)
 	}
 }
 

@@ -55,6 +55,9 @@ type Config struct {
 	MaxRequestBytes    int64
 	QueryURLs          []string
 	QueryTimeout       time.Duration
+	AuthEnabled        bool
+	AuthUsername       string
+	AuthPassword       string
 	LogLevel           slog.Level
 }
 
@@ -160,6 +163,15 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.MaxRequestBytes, err = intEnv(lookup, "SKOPOS_MAX_REQUEST_BYTES", cfg.MaxRequestBytes); err != nil {
 		return Config{}, err
 	}
+	if cfg.AuthEnabled, err = boolEnv(lookup, "SKOPOS_AUTH_ENABLED", false); err != nil {
+		return Config{}, err
+	}
+	if cfg.AuthUsername, err = stringEnv(lookup, "SKOPOS_AUTH_USERNAME", ""); err != nil {
+		return Config{}, err
+	}
+	if cfg.AuthPassword, err = stringEnv(lookup, "SKOPOS_AUTH_PASSWORD", ""); err != nil {
+		return Config{}, err
+	}
 	if cfg.Mode == ModeFrontend {
 		raw, err := stringEnv(lookup, "SKOPOS_QUERY_URLS", "")
 		if err != nil {
@@ -204,6 +216,9 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	}
 	if cfg.Mode == ModeFrontend && len(cfg.QueryURLs) == 0 {
 		return Config{}, fmt.Errorf("SKOPOS_QUERY_URLS: at least one URL is required in frontend mode")
+	}
+	if cfg.AuthEnabled && (cfg.AuthUsername == "" || cfg.AuthPassword == "") {
+		return Config{}, fmt.Errorf("SKOPOS_AUTH_ENABLED requires SKOPOS_AUTH_USERNAME and SKOPOS_AUTH_PASSWORD")
 	}
 	if cfg.MaxMemoryUsage == 0 || cfg.MaxRowsToRead == 0 || cfg.MaxResultRows == 0 ||
 		cfg.MaxScanRows == 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
@@ -303,6 +318,18 @@ func uintEnv(lookup func(string) (string, bool), key string, fallback uint64) (u
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
 	return n, nil
+}
+
+func boolEnv(lookup func(string) (string, bool), key string, fallback bool) (bool, error) {
+	v, ok := lookup(key)
+	if !ok {
+		return fallback, nil
+	}
+	b, err := strconv.ParseBool(strings.TrimSpace(v))
+	if err != nil {
+		return false, fmt.Errorf("%s: %w", key, err)
+	}
+	return b, nil
 }
 
 func intEnv(lookup func(string) (string, bool), key string, fallback int64) (int64, error) {

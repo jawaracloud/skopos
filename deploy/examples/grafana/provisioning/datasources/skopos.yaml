@@ -4,6 +4,10 @@
 # release name or namespace. The three alpha query heads are implemented; see
 # docs/promql-support.md, docs/traceql-support.md, and docs/logql-support.md for
 # the supported subset. Unsupported queries return explicit errors.
+#
+# If auth.enabled=true in the chart, enable basicAuth on each datasource and
+# set basicAuthUser plus secureJsonData.basicAuthPassword from the same Secret.
+# Do not commit the password.
 apiVersion: 1
 
 datasources:

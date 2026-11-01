@@ -4,6 +4,14 @@
 {{- if and .Values.distributed.enabled (not .Values.gateway.enabled) }}
 {{- fail "distributed.enabled=true requires gateway.enabled=true" }}
 {{- end }}
+{{- if .Values.auth.enabled }}
+{{- if and .Values.auth.existingSecret (or .Values.auth.username .Values.auth.password) }}
+{{- fail "set either auth.existingSecret or inline auth.username/password, not both" }}
+{{- end }}
+{{- if and (not .Values.auth.existingSecret) (or (not .Values.auth.username) (not .Values.auth.password)) }}
+{{- fail "auth.enabled=true requires auth.existingSecret or both auth.username and auth.password" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.obi.enabled (not .Values.obi.serviceAccount.create) (not .Values.obi.serviceAccount.name) }}
 {{- fail "obi.enabled=true requires obi.serviceAccount.create=true or obi.serviceAccount.name" }}
 {{- end }}

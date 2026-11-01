@@ -25,9 +25,12 @@ guarantee and may receive security fixes only on the latest tag.
 
 ## Security model for v0.1
 
-- **No built-in authentication.** The query gateway has no user authentication,
-  authorization, or per-tenant isolation. Anyone who can reach the gateway can
-  read all telemetry in the configured ClickHouse database.
+- **Optional Basic authentication.** `auth.enabled=true` protects the query and
+  version routes with one operator-managed username/password; `/healthz` and
+  `/readyz` stay open for Kubernetes probes. There is no per-user
+  authorization, tenant isolation, or audit identity. Basic auth is only safe
+  over TLS. Disabled by default; do not expose the gateway without either the
+  chart auth or an authenticating proxy.
 - **ClusterIP only.** The gateway, Collector, and ClickHouse services are
   ClusterIP. NetworkPolicies restrict ingress traffic between components (v0.1
   does not ship egress policies; that is M6 hardening). The chart does not

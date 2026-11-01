@@ -114,7 +114,7 @@ Other known gaps that are **not** hidden by this draft:
 | `crypto_working` | N/A | No project-managed cryptographic algorithms or modes. |
 | `crypto_weaknesses` | N/A | No project-managed weak algorithms. |
 | `crypto_pfs` | N/A | No project-managed key agreement. |
-| `crypto_password_storage` | N/A | The gateway has no authentication or user passwords. |
+| `crypto_password_storage` | Met (caveat) | Optional Basic auth credentials live in a Kubernetes Secret and the gateway keeps only SHA-256 digests in memory. The Secret at-rest protection depends on the cluster (enable etcd encryption); Basic auth must run over TLS. |
 | `crypto_random` | N/A | The gateway does not generate keys or nonces. |
 | `delivery_mitm` | Met (release pending) | Source is delivered over HTTPS GitHub; release images would use HTTPS/GHCR. No binary release exists yet, so the release path is not demonstrated. |
 | `delivery_unsigned` | N/A | No cryptographic hashes are published over HTTP. Release checksums are inside the release artifacts; no release exists yet. |

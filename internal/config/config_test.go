@@ -43,6 +43,9 @@ func TestDefaults(t *testing.T) {
 	if cfg.LogLevel != slog.LevelInfo {
 		t.Errorf("LogLevel = %v", cfg.LogLevel)
 	}
+	if cfg.AuthEnabled || cfg.AuthUsername != "" || cfg.AuthPassword != "" {
+		t.Errorf("auth defaults = %#v", cfg)
+	}
 }
 
 func TestOverrides(t *testing.T) {
@@ -64,6 +67,9 @@ func TestOverrides(t *testing.T) {
 		"SKOPOS_READINESS_TIMEOUT":             "3s",
 		"SKOPOS_MAX_REQUEST_BYTES":             "6000",
 		"SKOPOS_LOG_LEVEL":                     "debug",
+		"SKOPOS_AUTH_ENABLED":                  "true",
+		"SKOPOS_AUTH_USERNAME":                 "viewer",
+		"SKOPOS_AUTH_PASSWORD":                 "secret",
 	}))
 	if err != nil {
 		t.Fatalf("FromLookup: %v", err)
@@ -88,6 +94,9 @@ func TestOverrides(t *testing.T) {
 	if cfg.LogLevel != slog.LevelDebug {
 		t.Fatalf("LogLevel = %v", cfg.LogLevel)
 	}
+	if !cfg.AuthEnabled || cfg.AuthUsername != "viewer" || cfg.AuthPassword != "secret" {
+		t.Fatalf("auth = %#v", cfg)
+	}
 }
 
 func TestInvalidValues(t *testing.T) {
@@ -109,6 +118,7 @@ func TestInvalidValues(t *testing.T) {
 		{"mode", "SKOPOS_MODE", "backend", "SKOPOS_MODE"},
 		{"query timeout", "SKOPOS_QUERY_TIMEOUT", "soon", "SKOPOS_QUERY_TIMEOUT"},
 		{"zero query timeout", "SKOPOS_QUERY_TIMEOUT", "0s", "SKOPOS_QUERY_TIMEOUT"},
+		{"auth bool", "SKOPOS_AUTH_ENABLED", "maybe", "SKOPOS_AUTH_ENABLED"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -120,6 +130,18 @@ func TestInvalidValues(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestAuthRequiresCredentials(t *testing.T) {
+	for _, values := range []map[string]string{
+		{"SKOPOS_AUTH_ENABLED": "true"},
+		{"SKOPOS_AUTH_ENABLED": "true", "SKOPOS_AUTH_USERNAME": "viewer"},
+		{"SKOPOS_AUTH_ENABLED": "true", "SKOPOS_AUTH_PASSWORD": "secret"},
+	} {
+		if _, err := FromLookup(lookupFrom(values)); err == nil || !strings.Contains(err.Error(), "SKOPOS_AUTH") {
+			t.Fatalf("values %#v error = %v", values, err)
+		}
 	}
 }
 

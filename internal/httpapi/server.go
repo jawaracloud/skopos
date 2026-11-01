@@ -14,6 +14,8 @@ import (
 	"net/http"
 	"runtime/debug"
 	"time"
+
+	"github.com/jawaracloud/skopos/internal/auth"
 )
 
 // Pinger checks backend readiness. The ClickHouse client implements it.
@@ -28,6 +30,8 @@ type Config struct {
 	Version          string
 	ReadinessTimeout time.Duration
 	MaxRequestBytes  int64
+	// Auth optionally protects every route except /healthz and /readyz.
+	Auth *auth.Basic
 	// Register adds the query-head routes to the server mux. It is called
 	// before the JSON 404 catch-all.
 	Register func(*http.ServeMux)
@@ -40,6 +44,7 @@ type Server struct {
 	version          string
 	readinessTimeout time.Duration
 	maxRequestBytes  int64
+	auth             *auth.Basic
 	register         func(*http.ServeMux)
 }
 
@@ -72,6 +77,7 @@ func New(cfg Config) (*Server, error) {
 		version:          cfg.Version,
 		readinessTimeout: cfg.ReadinessTimeout,
 		maxRequestBytes:  cfg.MaxRequestBytes,
+		auth:             cfg.Auth,
 		register:         cfg.Register,
 	}, nil
 }
@@ -103,6 +109,9 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	var h http.Handler = router
+	if s.auth != nil {
+		h = s.auth.Wrap(h, "/healthz", "/readyz")
+	}
 	h = s.limitBody(h)
 	h = s.securityHeaders(h)
 	h = recoverMiddleware(s.logger, h)

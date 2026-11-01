@@ -77,7 +77,8 @@ with the beta test matrix.
 
 - The chart's init job uses `CREATE TABLE IF NOT EXISTS`; it does not migrate
   existing tables. Changing table columns or TTL requires a manual migration.
-- The gateway has no auth. See [SECURITY.md](../SECURITY.md).
+- Basic auth is optional and uses one shared credential; there is no per-user
+  authorization or tenant isolation. See [SECURITY.md](../SECURITY.md).
 - OBI's kernel and capability requirements are external constraints, not
   something the chart can validate.
 - Query evaluation is in the gateway, not pushed down to ClickHouse. The row

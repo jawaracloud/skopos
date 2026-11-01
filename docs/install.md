@@ -98,6 +98,41 @@ single-binary deployment. `SKOPOS_MODE=worker` is an explicit alias for
 `SKOPOS_MODE=query`; both register the three query heads. ClickHouse remains
 the backend and owns merges/compaction; this is not a ClickHouse HA topology.
 
+## Basic authentication
+
+Authentication is optional and disabled by default. When enabled, all query
+routes and `/version` require HTTP Basic auth; `/healthz` and `/readyz` are
+exempt so Kubernetes probes continue to work.
+
+Preferred: create a Secret with `username` and `password`, then reference it:
+
+```sh
+kubectl -n observability create secret generic skopos-auth \
+  --from-literal=username=viewer \
+  --from-literal=password='change-me'
+
+helm upgrade skopos ./deploy/helm/skopos --namespace observability \
+  --set auth.enabled=true \
+  --set auth.existingSecret=skopos-auth
+```
+
+For a local test only, inline values are also supported:
+
+```sh
+helm upgrade skopos ./deploy/helm/skopos --namespace observability \
+  --set auth.enabled=true \
+  --set auth.username=viewer \
+  --set auth.password='change-me'
+```
+
+For a non-Helm deployment, set `SKOPOS_AUTH_ENABLED=true`,
+`SKOPOS_AUTH_USERNAME`, and `SKOPOS_AUTH_PASSWORD` directly.
+
+Configure Grafana's Prometheus, Loki, and Tempo datasources with `basicAuth:
+true`, `basicAuthUser`, and the password in `secureJsonData`. Basic auth sends
+reusable credentials with every request: use TLS at the ingress and do not
+expose the gateway over plain HTTP.
+
 ## Configuration
 
 The important values are:
@@ -120,6 +155,9 @@ The important values are:
 | `clickhouse.backup.enabled` | `false` | Optional CronJob that runs `BACKUP DATABASE` to a separate S3 destination. See [storage.md](storage.md). |
 | `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
 | `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
+| `auth.enabled` | `false` | Enable HTTP Basic auth on query and version routes. `/healthz` and `/readyz` stay open. |
+| `auth.existingSecret` | `""` | Secret with `username` and `password` keys. Preferred over inline values. |
+| `auth.username`, `auth.password` | `""` | Inline credentials rendered into a Secret. Use only when `existingSecret` is empty. |
 | `gateway.mode` | `all` | `all`, `query`/`worker`, or `frontend` for a single Deployment. |
 | `distributed.enabled` | `false` | Split into a public frontend and an internal query tier. |
 | `frontend.replicaCount` | `1` | Public proxy replicas when distributed. |
@@ -155,9 +193,9 @@ not a connection problem.
 
 `deploy/examples/kubernetes/ingress.example.yaml` is a starting point for an
 ingress that points at the gateway Service. It is not part of the chart and it
-is intentionally not secure by itself: v0.1 has no authentication. Add an
-authenticating proxy, TLS, and rate limiting before applying it, and tighten
-`networkPolicy.gateway.allowFrom` to the ingress controller namespace.
+is intentionally not secure by itself: terminate TLS at the ingress and enable
+`auth.enabled=true` (or an authenticating proxy), add rate limiting, and
+tighten `networkPolicy.gateway.allowFrom` to the ingress controller namespace.
 
 ## TTL, PVC, and disk-full behavior
 

@@ -149,6 +149,15 @@ jobs:
           helm template skopos deploy/helm/skopos --namespace observability \
             --set gateway.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /tmp/skopos-digest.yaml
+      - name: Render basic auth
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set auth.enabled=true \
+            --set auth.username=viewer \
+            --set auth.password=secret > /tmp/skopos-auth.yaml
+          grep -q 'SKOPOS_AUTH_ENABLED' /tmp/skopos-auth.yaml
+          grep -q 'SKOPOS_AUTH_USERNAME' /tmp/skopos-auth.yaml
+          grep -q 'name: skopos-auth' /tmp/skopos-auth.yaml
       - name: Render tiered storage and backup
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \

@@ -105,8 +105,10 @@ explicit, documented mode.
 - Full-text regex pushdown is index-accelerated only when ClickHouse can extract
   complete tokens from the pattern. Unanchored substring and some regex queries
   still scan.
-- The public Service still has no authentication. Use an authenticating ingress
-  or proxy; the frontend does not add auth.
+- Basic auth is optional and shared by the frontend and query tiers when
+  `auth.enabled=true`. It is one operator credential, not per-user
+  authorization; use TLS at the ingress and keep `/healthz` and `/readyz`
+  reachable for probes.
 - The backup job needs S3 credentials and a restore runbook. Normal CI does not
   require those credentials.
 
