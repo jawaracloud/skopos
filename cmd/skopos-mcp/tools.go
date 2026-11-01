@@ -81,8 +81,16 @@ func tools() []mcpTool {
 		},
 		{
 			Name:        "get_context_coverage",
-			Description: "Get documented context counts for metrics, services, logs, and traces.",
-			InputSchema: objectSchema(map[string]any{}, nil),
+			Description: "Get documented context counts and optional observed ClickHouse coverage/alerts.",
+			InputSchema: objectSchema(map[string]any{
+				"observed": map[string]any{"type": "boolean", "description": "Include observed counts and alerts."},
+				"min":      map[string]any{"type": "number", "minimum": 0, "maximum": 1, "description": "Minimum coverage before an alert (default 0.8)."},
+			}, nil),
+		},
+		{
+			Name:        "get_context_suggestions",
+			Description: "List observed-only metrics that need a human-authored catalog entry. This never writes the catalog.",
+			InputSchema: objectSchema(map[string]any{"limit": limit}, nil),
 		},
 		{
 			Name:        "get_well_known",

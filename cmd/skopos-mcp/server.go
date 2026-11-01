@@ -17,6 +17,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jawaracloud/skopos/internal/auth"
@@ -26,6 +27,7 @@ const (
 	defaultGatewayURL = "http://127.0.0.1:8080"
 	defaultMaxBytes   = 64 << 10
 	protocolVersion   = "2025-06-18"
+	sessionTTL        = 30 * time.Minute
 )
 
 var supportedProtocolVersions = map[string]struct{}{
@@ -54,6 +56,14 @@ type Server struct {
 	version  string
 	timeout  time.Duration
 	httpAuth *auth.Basic
+
+	sessionsMu sync.Mutex
+	sessions   map[string]*mcpSession
+}
+
+type mcpSession struct {
+	lastSeen time.Time
+	done     chan struct{}
 }
 
 // NewServer validates cfg and constructs a server.
@@ -94,6 +104,7 @@ func NewServer(cfg Config) (*Server, error) {
 		version:  cfg.Version,
 		timeout:  cfg.Timeout,
 		httpAuth: httpAuth,
+		sessions: make(map[string]*mcpSession),
 	}, nil
 }
 
@@ -345,7 +356,31 @@ func (s *Server) callTool(raw json.RawMessage) (toolResult, error) {
 		add(values, "include", args.Include)
 		return s.getContext(ctx, "/api/v1/context/traces/"+url.PathEscape(args.ID), values)
 	case "get_context_coverage":
-		return s.getContext(ctx, "/api/v1/context/coverage", nil)
+		var args struct {
+			Observed bool    `json:"observed"`
+			Min      float64 `json:"min"`
+		}
+		if err := decodeArgs(params.Arguments, &args); err != nil {
+			return toolResult{}, err
+		}
+		values := url.Values{}
+		if args.Observed {
+			values.Set("observed", "true")
+		}
+		if args.Min != 0 {
+			values.Set("min", strconv.FormatFloat(args.Min, 'f', -1, 64))
+		}
+		return s.getContext(ctx, "/api/v1/context/coverage", values)
+	case "get_context_suggestions":
+		var args struct {
+			Limit int `json:"limit"`
+		}
+		if err := decodeArgs(params.Arguments, &args); err != nil {
+			return toolResult{}, err
+		}
+		values := url.Values{}
+		addLimit(values, args.Limit)
+		return s.getContext(ctx, "/api/v1/context/suggestions", values)
 	case "get_well_known":
 		return s.getContext(ctx, "/.well-known/skopos.json", nil)
 	case "query_promql":
@@ -493,13 +528,8 @@ func (s *Server) HTTPHandler() http.Handler {
 		_, _ = w.Write([]byte(`{"status":"ok"}` + "\n"))
 	})
 	mux.HandleFunc("POST /mcp", s.handleHTTPMCP)
-	mux.HandleFunc("GET /mcp", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Allow", http.MethodPost+", "+http.MethodDelete)
-		http.Error(w, "streaming GET is not supported; POST JSON-RPC to /mcp", http.StatusMethodNotAllowed)
-	})
-	mux.HandleFunc("DELETE /mcp", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusNoContent)
-	})
+	mux.HandleFunc("GET /mcp", s.handleHTTPStream)
+	mux.HandleFunc("DELETE /mcp", s.handleHTTPDelete)
 	var handler http.Handler = mux
 	if s.httpAuth != nil {
 		// Health checks stay open for probes; MCP itself is protected.
@@ -521,8 +551,18 @@ func (s *Server) handleHTTPMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request rpcRequest
-	if json.Unmarshal(body, &request) == nil && request.Method == "initialize" {
-		w.Header().Set("Mcp-Session-Id", newSessionID())
+	_ = json.Unmarshal(body, &request)
+	if request.Method == "initialize" {
+		sessionID := newSessionID()
+		if sessionID == "" {
+			http.Error(w, "cannot create session", http.StatusInternalServerError)
+			return
+		}
+		s.addSession(sessionID)
+		w.Header().Set("Mcp-Session-Id", sessionID)
+	} else if !s.validSession(r.Header.Get("Mcp-Session-Id")) {
+		http.Error(w, "valid Mcp-Session-Id is required", http.StatusBadRequest)
+		return
 	}
 	response := s.handleLine(body)
 	if response == nil {
@@ -545,6 +585,89 @@ func (s *Server) handleHTTPMCP(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(encoded)
 	_, _ = w.Write([]byte("\n"))
+}
+
+func (s *Server) addSession(id string) {
+	s.sessionsMu.Lock()
+	s.pruneSessionsLocked()
+	s.sessions[id] = &mcpSession{lastSeen: time.Now(), done: make(chan struct{})}
+	s.sessionsMu.Unlock()
+}
+
+func (s *Server) validSession(id string) bool {
+	if id == "" {
+		return false
+	}
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	s.pruneSessionsLocked()
+	session, ok := s.sessions[id]
+	if ok {
+		session.lastSeen = time.Now()
+	}
+	return ok
+}
+
+func (s *Server) session(id string) *mcpSession {
+	s.sessionsMu.Lock()
+	defer s.sessionsMu.Unlock()
+	return s.sessions[id]
+}
+
+func (s *Server) deleteSession(id string) {
+	s.sessionsMu.Lock()
+	if session, ok := s.sessions[id]; ok {
+		close(session.done)
+		delete(s.sessions, id)
+	}
+	s.sessionsMu.Unlock()
+}
+
+func (s *Server) pruneSessionsLocked() {
+	cutoff := time.Now().Add(-sessionTTL)
+	for id, session := range s.sessions {
+		if session.lastSeen.Before(cutoff) {
+			close(session.done)
+			delete(s.sessions, id)
+		}
+	}
+}
+
+func (s *Server) handleHTTPStream(w http.ResponseWriter, r *http.Request) {
+	session := s.session(r.Header.Get("Mcp-Session-Id"))
+	if session == nil {
+		http.Error(w, "valid Mcp-Session-Id is required", http.StatusNotFound)
+		return
+	}
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming is not supported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+	_, _ = io.WriteString(w, ": connected\n\n")
+	flusher.Flush()
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-session.done:
+			return
+		case <-ticker.C:
+			_, _ = io.WriteString(w, ": keepalive\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func (s *Server) handleHTTPDelete(w http.ResponseWriter, r *http.Request) {
+	s.deleteSession(r.Header.Get("Mcp-Session-Id"))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func newSessionID() string {

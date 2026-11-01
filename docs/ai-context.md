@@ -180,7 +180,12 @@ adds caveats and provenance.
 `?observed=true` to include observed metric counts and a documented/observed
 coverage ratio from ClickHouse. If the observation source is unavailable, the
 response carries `observed_unavailable` rather than failing the documented
-counts.
+counts. `min` (default `0.8`) controls whether a low-coverage alert is emitted.
+
+`GET /api/v1/context/suggestions` lists observed-only metrics that have no
+catalog entry. It proposes observed type/unit/description only, sets
+`approval: "human_required"`, and never writes the catalog. A human must review
+and commit the catalog change.
 
 ### Service response
 
@@ -318,6 +323,7 @@ get_log_context
 list_traces
 get_trace_context
 get_context_coverage
+get_context_suggestions
 get_well_known
 query_promql
 query_logql
@@ -352,12 +358,14 @@ SKOPOS_MCP_HTTP_PASSWORD=change-me \
 ```text
 GET  /healthz   # probe, unauthenticated
 POST /mcp       # JSON-RPC request, JSON or text/event-stream response
-GET  /mcp       # 405; server-initiated streaming is not implemented
-DELETE /mcp     # 204
+GET  /mcp       # SSE stream; requires Mcp-Session-Id
+DELETE /mcp     # terminate the session; 204
 ```
 
-`initialize` responses include `Mcp-Session-Id`. `POST /mcp` accepts one
-JSON-RPC message and caps the request body at 1 MiB. Put this endpoint behind
+`initialize` responses include `Mcp-Session-Id`; send that header on subsequent
+POST, GET, and DELETE requests. GET `/mcp` sends an initial `: connected` event
+and keepalive comments. `POST /mcp` accepts one JSON-RPC message and caps the
+request body at 1 MiB. Put this endpoint behind
 TLS and use the optional MCP HTTP Basic auth; do not expose it directly to the
 internet.
 
@@ -374,9 +382,10 @@ internet.
 This keeps the model context small: one compact service card, one compact
 signal card, then a query.
 
-## Phase 4
+## Phase 4 (remaining)
 
-- Remote MCP server-initiated streaming (GET SSE and resumability).
+- Resumability for interrupted SSE streams.
 - Observed log/trace metadata, not only observed metrics.
-- Suggested context from observed metadata with human approval.
-- Coverage alerts for metrics/services missing context.
+- A reviewed write/apply path for suggestions (the API currently only proposes
+  them; it never writes the catalog).
+- External delivery of coverage alerts to monitoring.

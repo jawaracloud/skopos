@@ -454,6 +454,60 @@ func TestObservedCoverageUnavailable(t *testing.T) {
 	}
 }
 
+func TestContextSuggestions(t *testing.T) {
+	observer := &fakeObserver{items: []ObservedMetric{
+		{Name: "observed_metric_total", Type: "counter", Unit: "requests", Description: "Observed only"},
+		{Name: "demo_temperature_celsius", Type: "gauge", Unit: "Cel"},
+	}}
+	mux := http.NewServeMux()
+	NewAPI(mustCatalog(t)).WithObserver(observer).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/suggestions"))
+	if body["total"] != float64(1) {
+		t.Fatalf("suggestions = %v", body)
+	}
+	item := body["items"].([]any)[0].(map[string]any)
+	if item["name"] != "observed_metric_total" || item["approval"] != "human_required" {
+		t.Fatalf("suggestion = %v", item)
+	}
+	if suggested := item["suggested"].(map[string]any); suggested["type"] != "counter" {
+		t.Fatalf("suggested = %v", suggested)
+	}
+	if _, ok := item["role"]; ok {
+		t.Fatalf("suggestion invented role: %v", item)
+	}
+
+	noObserver := http.NewServeMux()
+	NewAPI(EmptyCatalog()).Register(noObserver)
+	unavailable := decodeMap(t, get(t, noObserver, "/api/v1/context/suggestions"))
+	if flags := unavailable["flags"].([]any); !containsString(flags, "observed_unavailable") {
+		t.Fatalf("unavailable = %v", unavailable)
+	}
+	if rec := get(t, mux, "/api/v1/context/suggestions?limit=51"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("limit status = %d", rec.Code)
+	}
+}
+
+func TestCoverageAlerts(t *testing.T) {
+	observer := &fakeObserver{items: []ObservedMetric{
+		{Name: "observed_metric_total", Type: "counter", Unit: "requests"},
+		{Name: "observed_metric_second", Type: "gauge", Unit: "1"},
+	}}
+	mux := http.NewServeMux()
+	NewAPI(EmptyCatalog()).WithObserver(observer).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true&min=0.8"))
+	alerts := body["alerts"].([]any)
+	if len(alerts) != 1 {
+		t.Fatalf("alerts = %v", body)
+	}
+	alert := alerts[0].(map[string]any)
+	if alert["signal"] != "metrics" || alert["kind"] != "low_coverage" || alert["observed"] != float64(2) {
+		t.Fatalf("alert = %v", alert)
+	}
+	if rec := get(t, mux, "/api/v1/context/coverage?observed=true&min=2"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("min status = %d", rec.Code)
+	}
+}
+
 func containsString(values []any, want string) bool {
 	for _, value := range values {
 		if value == want {
