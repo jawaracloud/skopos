@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -56,6 +55,11 @@ type TraceSummary struct {
 	RootTraceName   string
 	Start           time.Time
 	Duration        time.Duration
+	// MatchedSpans are the spans that matched the query, in trace order.
+	MatchedSpans []Span
+	// AllSpans are every span fetched for the trace. They are used for
+	// serviceStats and for the full-trace root/duration summary.
+	AllSpans []Span
 }
 
 // ClickHouseFetcher reads spans from the exporter's otel_traces table.
@@ -136,59 +140,67 @@ func (f *ClickHouseFetcher) fetch(ctx context.Context, query plan.Query) ([]Span
 	return spans, nil
 }
 
-// Search groups matching spans into trace summaries.
+// Search groups spans by trace, evaluates trace-level and span-level
+// intrinsics, and returns one summary per matching trace. The root service,
+// root name, start, and duration are always computed from every fetched span
+// in the trace, not only from the spans that matched the filter.
 func Search(spans []Span, filter Filter, minDuration, maxDuration time.Duration, limit int) []TraceSummary {
-	type group struct {
-		spans []Span
-	}
-	groups := make(map[string]*group)
+	groups := make(map[string][]Span)
+	order := make([]string, 0)
 	for _, span := range spans {
-		if filter != nil && !filter.Match(span) {
-			continue
+		id := strings.ToLower(span.TraceID)
+		if _, ok := groups[id]; !ok {
+			order = append(order, id)
 		}
-		g := groups[span.TraceID]
-		if g == nil {
-			g = &group{}
-			groups[span.TraceID] = g
-		}
-		g.spans = append(g.spans, span)
+		groups[id] = append(groups[id], span)
 	}
 	out := make([]TraceSummary, 0, len(groups))
-	for id, g := range groups {
-		start := g.spans[0].Timestamp
-		end := g.spans[0].Timestamp.Add(time.Duration(g.spans[0].Duration))
-		var root *Span
-		for i := range g.spans {
-			span := &g.spans[i]
-			if span.Timestamp.Before(start) {
-				start = span.Timestamp
-			}
-			if spanEnd := span.Timestamp.Add(time.Duration(span.Duration)); spanEnd.After(end) {
-				end = spanEnd
-			}
-			if span.ParentSpanID == "" && (root == nil || span.Timestamp.Before(root.Timestamp)) {
-				root = span
+	for _, id := range order {
+		traceSpans := groups[id]
+		info := TraceInfoFor(id, traceSpans)
+		matched := make([]Span, 0, len(traceSpans))
+		for _, span := range traceSpans {
+			if filter == nil || matchTrace(filter, span, info) {
+				matched = append(matched, span)
 			}
 		}
-		if root == nil {
-			root = &g.spans[0]
+		if len(matched) == 0 {
+			continue
 		}
-		duration := end.Sub(start)
+		duration := info.Duration()
 		if minDuration > 0 && duration < minDuration {
 			continue
 		}
 		if maxDuration > 0 && duration > maxDuration {
 			continue
 		}
+		rootService := info.RootServiceName
+		rootName := info.RootName
+		if !info.HasRoot {
+			// Display a best-effort root for orphan-only traces, but trace:
+			// root intrinsics stay absent for these traces.
+			sortSpans(traceSpans)
+			rootService = rootServiceName(traceSpans[0])
+			rootName = traceSpans[0].SpanName
+		}
+		sortSpans(matched)
+		sortSpans(traceSpans)
 		out = append(out, TraceSummary{
 			TraceID:         id,
-			RootServiceName: root.ServiceName,
-			RootTraceName:   root.SpanName,
-			Start:           start,
+			RootServiceName: rootService,
+			RootTraceName:   rootName,
+			Start:           info.Start,
 			Duration:        duration,
+			MatchedSpans:    matched,
+			AllSpans:        traceSpans,
 		})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Start.After(out[j].Start) })
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Start.Equal(out[j].Start) {
+			return out[i].TraceID < out[j].TraceID
+		}
+		return out[i].Start.After(out[j].Start)
+	})
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
@@ -354,72 +366,71 @@ func stringAt(values []string, i int) string {
 	return ""
 }
 
-// Helper for tag value extraction from a span.
+// SpanTag returns the first value for a tag on a span. It is kept for callers
+// that only need a single value; event and link scopes can produce several.
 func SpanTag(span Span, tag string) (string, bool) {
-	tag = strings.TrimPrefix(tag, ".")
-	if scope, key := tagScope(tag); scope != "" {
-		tag = scope + "." + key
+	values := TagValues(span, tag, TraceInfoFor(span.TraceID, []Span{span}))
+	if len(values) == 0 {
+		return "", false
 	}
-	switch tag {
-	case "service.name", "resource.service.name":
-		if span.ServiceName != "" {
-			return span.ServiceName, true
-		}
-		v, ok := span.ResourceAttributes["service.name"]
-		return v, ok
-	case "name", "span.name":
-		return span.SpanName, true
-	case "status", "span.status":
-		return span.StatusCode, true
-	case "kind", "span.kind":
-		return span.SpanKind, true
-	case "duration", "span.duration":
-		return strconv.FormatUint(span.Duration, 10), true
-	}
-	scope, key := tagScope(tag)
-	switch scope {
-	case "resource":
-		v, ok := span.ResourceAttributes[key]
-		return v, ok
-	case "span":
-		v, ok := span.SpanAttributes[key]
-		return v, ok
-	default:
-		if v, ok := span.SpanAttributes[key]; ok {
-			return v, true
-		}
-		v, ok := span.ResourceAttributes[key]
-		return v, ok
-	}
+	return values[0], true
 }
 
-func tagScope(tag string) (string, string) {
-	switch {
-	case strings.HasPrefix(tag, "resource."):
-		return "resource", strings.TrimPrefix(tag, "resource.")
-	case strings.HasPrefix(tag, "span."):
-		return "span", strings.TrimPrefix(tag, "span.")
-	case strings.HasPrefix(tag, "intrinsic."):
-		return "intrinsic", strings.TrimPrefix(tag, "intrinsic.")
-	case strings.HasPrefix(tag, "resource:"):
-		return "resource", strings.TrimPrefix(tag, "resource:")
-	case strings.HasPrefix(tag, "span:"):
-		return "span", strings.TrimPrefix(tag, "span:")
-	case strings.HasPrefix(tag, "trace:"):
-		return "intrinsic", strings.TrimPrefix(tag, "trace:")
-	default:
-		return "", tag
+// TagValues returns every value for a tag. Tag names use the same scopes as
+// TraceQL: resource.*, span.*, event.*, link.*, and the colon intrinsics such
+// as span:name and trace:rootService.
+func TagValues(span Span, tag string, info TraceInfo) []string {
+	ref, err := parseKey(tag)
+	if err != nil {
+		return nil
 	}
+	c := condition{
+		scope:     ref.scope,
+		key:       ref.key,
+		intrinsic: ref.intrinsic,
+		explicit:  ref.explicit,
+		enum:      ref.enum,
+	}
+	switch ref.scope {
+	case "event":
+		values := eventValues(span, c)
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			out = append(out, value.text)
+		}
+		return out
+	case "link":
+		values := linkValues(span, c)
+		out := make([]string, 0, len(values))
+		for _, value := range values {
+			out = append(out, value.text)
+		}
+		return out
+	}
+	actual, ok := c.actual(span, info)
+	if !ok {
+		return nil
+	}
+	return []string{actual.text}
 }
 
-// TagNames returns all tag names in the given spans, plus intrinsic names.
+// TagNames returns all tag names grouped by Tempo scope. Intrinsic names match
+// the list Tempo exposes through /api/v2/search/tags.
 func TagNames(spans []Span) map[string]map[string]struct{} {
 	out := map[string]map[string]struct{}{
 		"resource":  {},
 		"span":      {},
+		"event":     {},
+		"link":      {},
 		"intrinsic": {},
 	}
-	for _, name := range []string{"duration", "kind", "name", "rootName", "rootServiceName", "status", "statusMessage", "traceDuration", "trace:duration", "trace:rootName", "trace:rootService", "span:duration", "span:kind", "span:name", "span:status", "span:statusMessage"} {
+	for _, name := range []string{
+		"duration", "event:name", "event:timeSinceStart",
+		"instrumentation:name", "instrumentation:version", "kind", "name",
+		"rootName", "rootServiceName", "span:duration", "span:kind", "span:name",
+		"span:status", "span:statusMessage", "status", "statusMessage",
+		"trace:duration", "trace:rootName", "trace:rootService", "traceDuration",
+	} {
 		out["intrinsic"][name] = struct{}{}
 	}
 	for _, span := range spans {
@@ -431,6 +442,16 @@ func TagNames(spans []Span) map[string]map[string]struct{} {
 		}
 		for key := range span.SpanAttributes {
 			out["span"][key] = struct{}{}
+		}
+		for _, event := range span.Events {
+			for key := range event.Attributes {
+				out["event"][key] = struct{}{}
+			}
+		}
+		for _, link := range span.Links {
+			for key := range link.Attributes {
+				out["link"][key] = struct{}{}
+			}
 		}
 	}
 	return out
