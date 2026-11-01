@@ -30,7 +30,7 @@ env:
 jobs:
   release:
     name: Build, package, and optionally sign
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
         with:
