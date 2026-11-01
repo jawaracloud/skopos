@@ -43,6 +43,7 @@ tokenizer; the server enforces the field and item limits above.
 ```text
 GET /api/v1/context
 GET /api/v1/context/metrics?service=checkout&role=latency&limit=20
+GET /api/v1/context/metrics?observed=true&limit=20
 GET /api/v1/context/metrics/{name}?detail=minimal
 GET /api/v1/context/metrics/{name}?detail=full&include=labels,caveats
 GET /api/v1/context/services/{service}?limit=10
@@ -91,6 +92,29 @@ The gateway does not guess:
 
 An agent should treat this as “ask the operator or discover the signal”, not as
 an invitation to invent a role.
+
+If the gateway is configured with observed metadata (`SKOPOS_CONTEXT_OBSERVED=true`,
+the default), an unknown metric can include a clearly labeled observed block:
+
+```json
+{
+  "schema": "ctx/v1",
+  "name": "demo_temperature_celsius",
+  "known": false,
+  "observed": {
+    "type": "gauge",
+    "unit": "Cel",
+    "description": "Demo temperature",
+    "source": "clickhouse",
+    "confidence": 0.4
+  },
+  "flags": ["missing_context", "observed_only"],
+  "sources": ["clickhouse"]
+}
+```
+
+`known` stays false: observed metadata is factual but has no semantic catalog
+contract. It must not be treated as an explicit role/direction/owner.
 
 ### List response
 
@@ -150,8 +174,13 @@ rules:
 
 `GET /api/v1/context/logs` and `/traces` return only compact list items.
 `detail=standard` adds the query, runbook, fields/downstream; `detail=full`
-adds caveats and provenance. `GET /api/v1/context/coverage` returns documented
-counts, not a fabricated ratio.
+adds caveats and provenance.
+
+`GET /api/v1/context/coverage` returns documented counts. Add
+`?observed=true` to include observed metric counts and a documented/observed
+coverage ratio from ClickHouse. If the observation source is unavailable, the
+response carries `observed_unavailable` rather than failing the documented
+counts.
 
 ### Service response
 
@@ -308,6 +337,30 @@ as MCP `isError` results. Responses larger than `SKOPOS_MCP_MAX_BYTES` (default
 64 KiB) are rejected with a “narrow the query” error instead of flooding the
 model context.
 
+### Remote MCP transport
+
+Set `SKOPOS_MCP_HTTP_ADDR` to run the same tools over HTTP instead of stdio:
+
+```sh
+SKOPOS_GATEWAY_URL=http://127.0.0.1:8080 \
+SKOPOS_MCP_HTTP_ADDR=127.0.0.1:8090 \
+SKOPOS_MCP_HTTP_USERNAME=mcp \
+SKOPOS_MCP_HTTP_PASSWORD=change-me \
+./bin/skopos-mcp
+```
+
+```text
+GET  /healthz   # probe, unauthenticated
+POST /mcp       # JSON-RPC request, JSON or text/event-stream response
+GET  /mcp       # 405; server-initiated streaming is not implemented
+DELETE /mcp     # 204
+```
+
+`initialize` responses include `Mcp-Session-Id`. `POST /mcp` accepts one
+JSON-RPC message and caps the request body at 1 MiB. Put this endpoint behind
+TLS and use the optional MCP HTTP Basic auth; do not expose it directly to the
+internet.
+
 ## Agent flow
 
 ```text
@@ -321,9 +374,9 @@ model context.
 This keeps the model context small: one compact service card, one compact
 signal card, then a query.
 
-## Phase 3
+## Phase 4
 
-- Automatic observed metadata with `source=clickhouse`, `confidence` lower than
-  explicit catalog.
-- Coverage across observed metrics, not just documented catalog entries.
-- Remote MCP transport (Streamable HTTP) in addition to stdio.
+- Remote MCP server-initiated streaming (GET SSE and resumability).
+- Observed log/trace metadata, not only observed metrics.
+- Suggested context from observed metadata with human approval.
+- Coverage alerts for metrics/services missing context.

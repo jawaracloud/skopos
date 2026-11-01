@@ -17,6 +17,10 @@ auth:
 # operator-authored JSON; no metric metadata is inferred by the gateway.
 context:
   enabled: false
+  # Read observed metric type/unit/description from ClickHouse for unknown
+  # metrics. This is labeled known:false + observed_only; it never overrides
+  # the explicit catalog.
+  observed: true
   # Preferred: an existing ConfigMap with a catalog.json key.
   existingConfigMap: ""
   # Inline catalog JSON. Rendered into a ConfigMap when existingConfigMap is

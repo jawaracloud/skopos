@@ -59,6 +59,7 @@ type Config struct {
 	AuthUsername       string
 	AuthPassword       string
 	ContextFile        string
+	ContextObserved    bool
 	LogLevel           slog.Level
 }
 
@@ -174,6 +175,9 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, err
 	}
 	if cfg.ContextFile, err = stringEnv(lookup, "SKOPOS_CONTEXT_FILE", ""); err != nil {
+		return Config{}, err
+	}
+	if cfg.ContextObserved, err = boolEnv(lookup, "SKOPOS_CONTEXT_OBSERVED", true); err != nil {
 		return Config{}, err
 	}
 	if cfg.Mode == ModeFrontend {

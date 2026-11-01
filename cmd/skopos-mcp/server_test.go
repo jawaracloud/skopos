@@ -201,13 +201,119 @@ func TestInitializeProtocolFallback(t *testing.T) {
 	}
 }
 
+func TestHTTPTransport(t *testing.T) {
+	gateway := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"schema":"ctx/v1","known":true}`))
+	}))
+	defer gateway.Close()
+	handler := newTestMCP(t, gateway.URL).HTTPHandler()
+
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Header().Get("Mcp-Session-Id") == "" {
+		t.Fatalf("initialize = %d headers=%v body=%s", rec.Code, rec.Header(), rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), `"protocolVersion":"2025-06-18"`) {
+		t.Fatalf("initialize body = %s", rec.Body)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_context_coverage","arguments":{}}}`))
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"content"`) {
+		t.Fatalf("tool = %d %s", rec.Code, rec.Body)
+	}
+	if got := getHTTP(t, handler, http.MethodGet, "/healthz"); got.Code != http.StatusOK {
+		t.Fatalf("health = %d", got.Code)
+	}
+	if got := getHTTP(t, handler, http.MethodGet, "/mcp"); got.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("get mcp = %d", got.Code)
+	}
+	if got := getHTTP(t, handler, http.MethodDelete, "/mcp"); got.Code != http.StatusNoContent {
+		t.Fatalf("delete mcp = %d", got.Code)
+	}
+}
+
+func TestHTTPAuth(t *testing.T) {
+	server, err := NewServer(Config{
+		GatewayURL: "http://127.0.0.1:1", HTTPUsername: "viewer", HTTPPassword: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := server.HTTPHandler()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated = %d", rec.Code)
+	}
+	req.SetBasicAuth("viewer", "secret")
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("authenticated = %d body=%s", rec.Code, rec.Body)
+	}
+	if got := getHTTP(t, handler, http.MethodGet, "/healthz"); got.Code != http.StatusOK {
+		t.Fatalf("health auth bypass = %d", got.Code)
+	}
+}
+
+func TestHTTPSSE(t *testing.T) {
+	gateway := httptest.NewServer(http.NotFoundHandler())
+	defer gateway.Close()
+	handler := newTestMCP(t, gateway.URL).HTTPHandler()
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	req.Header.Set("Accept", "text/event-stream")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("sse = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if !strings.HasPrefix(rec.Body.String(), "event: message\ndata: ") {
+		t.Fatalf("sse body = %q", rec.Body.String())
+	}
+}
+
+func TestHTTPRequestTooLarge(t *testing.T) {
+	server, err := NewServer(Config{GatewayURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(strings.Repeat("x", (1<<20)+1)))
+	rec := httptest.NewRecorder()
+	server.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d", rec.Code)
+	}
+}
+
+func getHTTP(t *testing.T, handler http.Handler, method, path string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(method, path, nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestConfigFromEnv(t *testing.T) {
 	t.Setenv("SKOPOS_GATEWAY_URL", "http://gateway:9000")
 	t.Setenv("SKOPOS_AUTH_USERNAME", "viewer")
 	t.Setenv("SKOPOS_AUTH_PASSWORD", "secret")
 	t.Setenv("SKOPOS_MCP_MAX_BYTES", "1234")
+	t.Setenv("SKOPOS_MCP_HTTP_ADDR", "127.0.0.1:8090")
+	t.Setenv("SKOPOS_MCP_HTTP_USERNAME", "mcp")
+	t.Setenv("SKOPOS_MCP_HTTP_PASSWORD", "pass")
 	cfg := ConfigFromEnv()
-	if cfg.GatewayURL != "http://gateway:9000" || cfg.Username != "viewer" || cfg.Password != "secret" || cfg.MaxBytes != 1234 {
+	if cfg.GatewayURL != "http://gateway:9000" || cfg.Username != "viewer" || cfg.Password != "secret" ||
+		cfg.MaxBytes != 1234 || cfg.HTTPAddr != "127.0.0.1:8090" ||
+		cfg.HTTPUsername != "mcp" || cfg.HTTPPassword != "pass" {
 		t.Fatalf("config = %#v", cfg)
 	}
 }

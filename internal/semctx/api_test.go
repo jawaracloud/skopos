@@ -1,7 +1,9 @@
 package semctx
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -330,6 +332,135 @@ func TestCoverageAndWellKnown(t *testing.T) {
 	if len(signals) != 4 {
 		t.Fatalf("signals = %v", signals)
 	}
+}
+
+type fakeObserver struct {
+	items      []ObservedMetric
+	observeErr error
+	listErr    error
+	calls      int
+}
+
+func (f *fakeObserver) Observe(_ context.Context, name string) (ObservedMetric, bool, error) {
+	f.calls++
+	if f.observeErr != nil {
+		return ObservedMetric{}, false, f.observeErr
+	}
+	for _, item := range f.items {
+		if item.Name == name {
+			return item, true, nil
+		}
+	}
+	return ObservedMetric{}, false, nil
+}
+
+func (f *fakeObserver) ListObserved(_ context.Context) ([]ObservedMetric, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	return f.items, nil
+}
+
+func TestObservedMetricIsProvenanceLabeled(t *testing.T) {
+	observer := &fakeObserver{items: []ObservedMetric{{
+		Name: "observed_metric_total", Type: "counter", Unit: "requests",
+		Description: "Observed only",
+	}}}
+	mux := http.NewServeMux()
+	NewAPI(mustCatalog(t)).WithObserver(observer).Register(mux)
+	rec := get(t, mux, "/api/v1/context/metrics/observed_metric_total")
+	body := decodeMap(t, rec)
+	if body["known"] != false {
+		t.Fatalf("known = %v", body["known"])
+	}
+	observed := body["observed"].(map[string]any)
+	if observed["source"] != "clickhouse" || observed["type"] != "counter" {
+		t.Fatalf("observed = %v", observed)
+	}
+	flags := body["flags"].([]any)
+	if !containsString(flags, "missing_context") || !containsString(flags, "observed_only") {
+		t.Fatalf("flags = %v", flags)
+	}
+	if rec.Body.Len() > 500 {
+		t.Fatalf("observed response too large: %d", rec.Body.Len())
+	}
+
+	// A catalog metric must not consult observed metadata.
+	observer.calls = 0
+	_ = get(t, mux, "/api/v1/context/metrics/demo_temperature_celsius")
+	if observer.calls != 0 {
+		t.Fatalf("observer called for a catalog metric: %d", observer.calls)
+	}
+}
+
+func TestObservedMetricUnavailable(t *testing.T) {
+	observer := &fakeObserver{observeErr: errors.New("clickhouse down")}
+	mux := http.NewServeMux()
+	NewAPI(EmptyCatalog()).WithObserver(observer).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/metrics/missing"))
+	flags := body["flags"].([]any)
+	if !containsString(flags, "observed_unavailable") {
+		t.Fatalf("flags = %v", flags)
+	}
+	if _, ok := body["observed"]; ok {
+		t.Fatalf("observed error leaked data: %v", body)
+	}
+}
+
+func TestObservedListAndCoverage(t *testing.T) {
+	observer := &fakeObserver{items: []ObservedMetric{
+		{Name: "observed_metric_total", Type: "counter", Unit: "requests"},
+		{Name: "demo_temperature_celsius", Type: "gauge", Unit: "Cel"},
+	}}
+	mux := http.NewServeMux()
+	NewAPI(mustCatalog(t)).WithObserver(observer).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/metrics?observed=true"))
+	items := body["items"].([]any)
+	if len(items) != 3 {
+		t.Fatalf("items = %v", items)
+	}
+	var observed map[string]any
+	for _, raw := range items {
+		item := raw.(map[string]any)
+		if item["name"] == "observed_metric_total" {
+			observed = item
+		}
+	}
+	if observed == nil || observed["observed"] != true {
+		t.Fatalf("observed item = %v", observed)
+	}
+	if flags := observed["flags"].([]any); !containsString(flags, "observed_only") {
+		t.Fatalf("observed flags = %v", flags)
+	}
+	coverage := decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true"))
+	observedCoverage := coverage["observed"].(map[string]any)
+	if observedCoverage["metrics"] != float64(2) || observedCoverage["coverage"] != 1.0 {
+		t.Fatalf("coverage = %v", coverage)
+	}
+	if rec := get(t, mux, "/api/v1/context/coverage?observed=maybe"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid observed status = %d", rec.Code)
+	}
+}
+
+func TestObservedCoverageUnavailable(t *testing.T) {
+	observer := &fakeObserver{listErr: errors.New("clickhouse down")}
+	mux := http.NewServeMux()
+	NewAPI(EmptyCatalog()).WithObserver(observer).Register(mux)
+	body := decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true"))
+	observed := body["observed"].(map[string]any)
+	flags := observed["flags"].([]any)
+	if !containsString(flags, "observed_unavailable") {
+		t.Fatalf("coverage = %v", body)
+	}
+}
+
+func containsString(values []any, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestETagCache(t *testing.T) {

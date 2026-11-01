@@ -173,6 +173,7 @@ The important values are:
 | `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
 | `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
 | `context.enabled` | `false` | Mount a semantic context catalog and serve `/api/v1/context/*`. |
+| `context.observed` | `true` | Read observed metric type/unit/description from ClickHouse for unknown metrics; labeled `known:false` and `observed_only`. |
 | `context.existingConfigMap` | `""` | Existing ConfigMap with a `catalog.json` key. |
 | `context.catalog` | `""` | Inline catalog JSON rendered into a ConfigMap. |
 | `auth.enabled` | `false` | Enable HTTP Basic auth on query and version routes. `/healthz` and `/readyz` stay open. |

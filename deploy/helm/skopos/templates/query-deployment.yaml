@@ -65,6 +65,8 @@ spec:
             {{- if .Values.context.enabled }}
             - name: SKOPOS_CONTEXT_FILE
               value: /etc/skopos/context/catalog.json
+            - name: SKOPOS_CONTEXT_OBSERVED
+              value: {{ .Values.context.observed | quote }}
             {{- end }}
             - name: SKOPOS_LISTEN_ADDR
               value: ":{{ .Values.query.service.port }}"

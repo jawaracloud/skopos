@@ -41,7 +41,7 @@ existing Grafana.
 | Distributed read path | Alpha | Optional public frontend plus stateless query workers (`distributed.enabled=true`); the frontend has no ClickHouse credentials. |
 | Basic authentication | Optional | `auth.enabled=true` protects query/version routes with one operator-managed credential; `/healthz` and `/readyz` stay open for probes. Use TLS. |
 | systemd deployment | Alpha | Unit files for single-process and frontend/query split, local schema renderer, and a full operations guide in [docs/systemd.md](docs/systemd.md). |
-| AI SRE context API | Alpha | Optional, compact `/api/v1/context/*` catalog for metrics, services, logs, and traces, plus a stdio MCP server. Detail defaults to `minimal`; unknown signals return `known:false`. See [docs/ai-context.md](docs/ai-context.md). |
+| AI SRE context API | Alpha | Optional compact catalog for metrics, services, logs, and traces, plus stdio/HTTP MCP tools. Unknown metrics can include ClickHouse observed metadata labeled `known:false`/`observed_only`. See [docs/ai-context.md](docs/ai-context.md). |
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
 | OpenSSF | Measured, public | Official Scorecard action reports **7.8** and publishes the badge. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
@@ -198,7 +198,7 @@ types for Tempo responses; both are recorded in [docs/dependencies.md](docs/depe
 
 ```sh
 make build                # build the gateway
-make mcp                  # build the stdio MCP server
+make mcp                  # build the stdio/HTTP MCP server
 make test                 # unit tests
 make test-integration     # requires a ClickHouse HTTP endpoint
 make fuzz                 # short anti-leak fuzz run
