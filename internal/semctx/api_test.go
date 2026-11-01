@@ -525,6 +525,43 @@ func TestObservedLogTraceCoverage(t *testing.T) {
 		t.Fatalf("alerts = %v", alerts)
 	}
 
+	logs := decodeMap(t, get(t, mux, "/api/v1/context/logs?observed=true"))
+	logItems := logs["items"].([]any)
+	if len(logItems) != 3 {
+		t.Fatalf("log items = %v", logItems)
+	}
+	var observedLogIDValue string
+	for _, raw := range logItems {
+		item := raw.(map[string]any)
+		if item["observed"] == true {
+			observedLogIDValue = item["id"].(string)
+		}
+	}
+	if observedLogIDValue == "" {
+		t.Fatalf("no observed log item: %v", logItems)
+	}
+	observedLog := decodeMap(t, get(t, mux, "/api/v1/context/logs/"+observedLogIDValue))
+	if observedLog["known"] != false || observedLog["observed"].(map[string]any)["source"] != "clickhouse" {
+		t.Fatalf("observed log detail = %v", observedLog)
+	}
+
+	traces := decodeMap(t, get(t, mux, "/api/v1/context/traces?observed=true"))
+	traceItems := traces["items"].([]any)
+	if len(traceItems) != 3 {
+		t.Fatalf("trace items = %v", traceItems)
+	}
+	var observedTraceIDValue string
+	for _, raw := range traceItems {
+		item := raw.(map[string]any)
+		if item["observed"] == true {
+			observedTraceIDValue = item["id"].(string)
+		}
+	}
+	observedTrace := decodeMap(t, get(t, mux, "/api/v1/context/traces/"+observedTraceIDValue))
+	if observedTrace["known"] != false || observedTrace["observed"].(map[string]any)["source"] != "clickhouse" {
+		t.Fatalf("observed trace detail = %v", observedTrace)
+	}
+
 	signals.logsErr = errors.New("logs down")
 	signals.tracesErr = errors.New("traces down")
 	body = decodeMap(t, get(t, mux, "/api/v1/context/coverage?observed=true"))
@@ -553,6 +590,33 @@ func TestCoverageAlerts(t *testing.T) {
 	}
 	if rec := get(t, mux, "/api/v1/context/coverage?observed=true&min=2"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("min status = %d", rec.Code)
+	}
+}
+
+func TestMetricsEndpoint(t *testing.T) {
+	observer := &fakeObserver{items: []ObservedMetric{
+		{Name: "observed_metric_total", Type: "counter", Unit: "requests"},
+	}}
+	signals := &fakeSignalObserver{
+		logs:   []ObservedLog{{Service: "checkout", Event: "exception"}},
+		traces: []ObservedTrace{{Service: "checkout", Operation: "GET /checkout"}},
+	}
+	mux := http.NewServeMux()
+	NewAPI(EmptyCatalog()).WithObserver(observer).WithSignalObserver(signals).Register(mux)
+	rec := get(t, mux, "/metrics")
+	if rec.Code != http.StatusOK || !strings.HasPrefix(rec.Header().Get("Content-Type"), "text/plain") {
+		t.Fatalf("metrics = %d %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	for _, want := range []string{
+		`skopos_context_documented{signal="metrics"} 0`,
+		`skopos_context_observed{signal="metrics"} 1`,
+		`skopos_context_observed{signal="logs"} 1`,
+		`skopos_context_observed{signal="traces"} 1`,
+		`skopos_context_low_coverage{signal="metrics"} 1`,
+	} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("metrics body missing %q:\n%s", want, rec.Body)
+		}
 	}
 }
 
