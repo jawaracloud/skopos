@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func runServer(t *testing.T, server *Server, lines ...string) []map[string]any {
@@ -58,7 +61,7 @@ func TestInitializeAndToolsList(t *testing.T) {
 	}
 	toolsResult := responses[1]["result"].(map[string]any)
 	toolList := toolsResult["tools"].([]any)
-	if len(toolList) != 12 {
+	if len(toolList) != 13 {
 		t.Fatalf("tools = %d", len(toolList))
 	}
 }
@@ -213,7 +216,8 @@ func TestHTTPTransport(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK || rec.Header().Get("Mcp-Session-Id") == "" {
+	sessionID := rec.Header().Get("Mcp-Session-Id")
+	if rec.Code != http.StatusOK || sessionID == "" {
 		t.Fatalf("initialize = %d headers=%v body=%s", rec.Code, rec.Header(), rec.Body)
 	}
 	if !strings.Contains(rec.Body.String(), `"protocolVersion":"2025-06-18"`) {
@@ -222,6 +226,7 @@ func TestHTTPTransport(t *testing.T) {
 
 	req = httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
 		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_context_coverage","arguments":{}}}`))
+	req.Header.Set("Mcp-Session-Id", sessionID)
 	rec = httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"content"`) {
@@ -230,11 +235,15 @@ func TestHTTPTransport(t *testing.T) {
 	if got := getHTTP(t, handler, http.MethodGet, "/healthz"); got.Code != http.StatusOK {
 		t.Fatalf("health = %d", got.Code)
 	}
-	if got := getHTTP(t, handler, http.MethodGet, "/mcp"); got.Code != http.StatusMethodNotAllowed {
-		t.Fatalf("get mcp = %d", got.Code)
+	if got := getHTTP(t, handler, http.MethodGet, "/mcp"); got.Code != http.StatusNotFound {
+		t.Fatalf("get mcp without session = %d", got.Code)
 	}
-	if got := getHTTP(t, handler, http.MethodDelete, "/mcp"); got.Code != http.StatusNoContent {
-		t.Fatalf("delete mcp = %d", got.Code)
+	req = httptest.NewRequest(http.MethodDelete, "/mcp", nil)
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("delete mcp = %d", rec.Code)
 	}
 }
 
@@ -268,9 +277,18 @@ func TestHTTPSSE(t *testing.T) {
 	gateway := httptest.NewServer(http.NotFoundHandler())
 	defer gateway.Close()
 	handler := newTestMCP(t, gateway.URL).HTTPHandler()
+	init := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
+		`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, init)
+	sessionID := initRec.Header().Get("Mcp-Session-Id")
+	if sessionID == "" {
+		t.Fatal("missing session id")
+	}
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(
-		`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+		`{"jsonrpc":"2.0","id":2,"method":"ping"}`))
 	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Mcp-Session-Id", sessionID)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "text/event-stream" {
@@ -278,6 +296,46 @@ func TestHTTPSSE(t *testing.T) {
 	}
 	if !strings.HasPrefix(rec.Body.String(), "event: message\ndata: ") {
 		t.Fatalf("sse body = %q", rec.Body.String())
+	}
+}
+
+func TestHTTPGetStream(t *testing.T) {
+	gateway := httptest.NewServer(http.NotFoundHandler())
+	defer gateway.Close()
+	server := newTestMCP(t, gateway.URL)
+	httpServer := httptest.NewServer(server.HTTPHandler())
+	defer httpServer.Close()
+
+	resp, err := http.Post(httpServer.URL+"/mcp", "application/json",
+		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	_ = resp.Body.Close()
+	if sessionID == "" {
+		t.Fatal("missing session id")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, httpServer.URL+"/mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	stream, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Body.Close()
+	if stream.StatusCode != http.StatusOK || stream.Header.Get("Content-Type") != "text/event-stream" {
+		t.Fatalf("stream = %d %q", stream.StatusCode, stream.Header.Get("Content-Type"))
+	}
+	reader := bufio.NewReader(stream.Body)
+	line, err := reader.ReadString('\n')
+	if err != nil || line != ": connected\n" {
+		t.Fatalf("first stream line = %q, %v", line, err)
 	}
 }
 

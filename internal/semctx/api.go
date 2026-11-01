@@ -71,6 +71,7 @@ func (a *API) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/v1/context/traces", a.handleTraces)
 	mux.HandleFunc("GET /api/v1/context/traces/{id}", a.handleTrace)
 	mux.HandleFunc("GET /api/v1/context/coverage", a.handleCoverage)
+	mux.HandleFunc("GET /api/v1/context/suggestions", a.handleSuggestions)
 	mux.HandleFunc("GET /.well-known/skopos.json", a.handleWellKnown)
 }
 
@@ -425,6 +426,38 @@ type coverageResponse struct {
 	Logs     signalCoverage    `json:"logs"`
 	Traces   signalCoverage    `json:"traces"`
 	Observed *observedCoverage `json:"observed,omitempty"`
+	Alerts   []coverageAlert   `json:"alerts,omitempty"`
+}
+
+type coverageAlert struct {
+	Signal     string  `json:"signal"`
+	Kind       string  `json:"kind"`
+	Documented int     `json:"documented"`
+	Observed   int     `json:"observed"`
+	Threshold  float64 `json:"threshold"`
+}
+
+type suggestionResponse struct {
+	Schema  string       `json:"schema"`
+	Version string       `json:"version"`
+	Items   []suggestion `json:"items"`
+	Total   int          `json:"total"`
+	HasMore bool         `json:"has_more,omitempty"`
+	Flags   []string     `json:"flags,omitempty"`
+}
+
+type suggestion struct {
+	Name      string           `json:"name"`
+	Observed  observedResponse `json:"observed"`
+	Suggested suggestedMetric  `json:"suggested"`
+	Flags     []string         `json:"flags"`
+	Approval  string           `json:"approval"`
+}
+
+type suggestedMetric struct {
+	Description string `json:"description,omitempty"`
+	Type        string `json:"type,omitempty"`
+	Unit        string `json:"unit,omitempty"`
 }
 
 type observedCoverage struct {
@@ -622,6 +655,11 @@ func (a *API) handleCoverage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid observed")
 		return
 	}
+	minCoverage, err := parseMinCoverage(r.URL.Query().Get("min"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if includeObserved && a.Observer != nil {
 		observed, err := a.Observer.ListObserved(r.Context())
 		if err != nil {
@@ -635,9 +673,76 @@ func (a *API) handleCoverage(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			out.Observed = &observedCoverage{Metrics: len(observed), Coverage: coverage}
+			if len(observed) > 0 && coverage < minCoverage {
+				out.Alerts = append(out.Alerts, coverageAlert{
+					Signal: "metrics", Kind: "low_coverage",
+					Documented: len(a.Catalog.Metrics), Observed: len(observed),
+					Threshold: minCoverage,
+				})
+			}
 		}
 	}
 	writeJSON(w, r, a.Catalog.Version, out)
+}
+
+func (a *API) handleSuggestions(w http.ResponseWriter, r *http.Request) {
+	out := suggestionResponse{Schema: SchemaVersion, Version: a.Catalog.Version, Items: []suggestion{}}
+	if a.Observer == nil {
+		out.Flags = []string{"observed_unavailable"}
+		writeJSON(w, r, a.Catalog.Version, out)
+		return
+	}
+	limit, err := parseLimit(r.URL.Query().Get("limit"), defaultListLimit, maxListLimit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	observed, err := a.Observer.ListObserved(r.Context())
+	if err != nil {
+		out.Flags = []string{"observed_unavailable"}
+		writeJSON(w, r, a.Catalog.Version, out)
+		return
+	}
+	names := make([]string, 0, len(observed))
+	observedByName := make(map[string]ObservedMetric, len(observed))
+	for _, item := range observed {
+		if _, known := a.Catalog.Metrics[item.Name]; known {
+			continue
+		}
+		names = append(names, item.Name)
+		observedByName[item.Name] = item
+	}
+	sort.Strings(names)
+	out.Total = len(names)
+	if len(names) > limit {
+		names = names[:limit]
+	}
+	out.HasMore = out.Total > len(names)
+	for _, name := range names {
+		item := observedByName[name]
+		out.Items = append(out.Items, suggestion{
+			Name: name,
+			Observed: observedResponse{
+				Type: item.Type, Unit: item.Unit, Description: item.Description,
+				Source: "clickhouse", Confidence: 0.4,
+			},
+			Suggested: suggestedMetric{Description: item.Description, Type: item.Type, Unit: item.Unit},
+			Flags:     []string{"missing_context", "needs_review"},
+			Approval:  "human_required",
+		})
+	}
+	writeJSON(w, r, a.Catalog.Version, out)
+}
+
+func parseMinCoverage(raw string) (float64, error) {
+	if raw == "" {
+		return 0.8, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value < 0 || value > 1 {
+		return 0, fmt.Errorf("min must be between 0 and 1")
+	}
+	return value, nil
 }
 
 func parseOptionalBool(raw string) (bool, error) {
