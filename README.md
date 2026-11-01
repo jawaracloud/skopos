@@ -5,6 +5,8 @@
 > ClickHouse. It is not production-ready. APIs, schemas, and chart values may
 > change without notice.
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/jawaracloud/skopos/badge)](https://securityscorecards.dev/viewer/?uri=github.com/jawaracloud/skopos)
+
 Skopos keeps the Grafana workflows you already have. It stores metrics, traces,
 and logs in ClickHouse and exposes Prometheus, Loki, and Tempo compatible query
 APIs through a small Go query gateway, so existing Grafana dashboards can keep
@@ -39,7 +41,7 @@ existing Grafana.
 | Distributed read path | Alpha | Optional public frontend plus stateless query workers (`distributed.enabled=true`); the frontend has no ClickHouse credentials. |
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
-| OpenSSF | Measured | Scorecard CLI 6.5 on the current main; Best Practices evidence package prepared. The badge is blocked until the repository is public. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
+| OpenSSF | Measured, public | Official Scorecard action reports **7.1** and publishes the badge. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
 | Release tooling | Scaffolded | SBOM fallback, signed-image hooks, chart package, and release workflow in [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,

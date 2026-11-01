@@ -118,5 +118,6 @@ Still required before publishing the alpha release:
   the PromQL differential oracle, the S3/RustFS integration test, and the
   Tempo/Loki/cerberus reference harnesses as blocking CI gates (current CI
   runs them).
-- OpenSSF Scorecard CLI v5.6.0 runs weekly with a read-only token. The official
-  Scorecard action is optional and requires GHAS on a private repository.
+- The official OpenSSF Scorecard action runs weekly, on pushes to `main`, and on
+  manual dispatch. It publishes results to the public Scorecard API and uploads
+  SARIF to code scanning. `make scorecard` remains the local CLI fallback.

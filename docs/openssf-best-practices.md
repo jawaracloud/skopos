@@ -5,14 +5,13 @@ This is a complete, honest draft for the
 level. It is not a submitted application, and it is not a claim that the badge
 has been awarded.
 
-## Status: blocked on repository visibility
+## Status: ready to submit
 
-The repository is currently **private** (`jawaracloud/skopos`, GitHub Free
-organization). The passing criterion `repo_public` is a **MUST**, and several
-reporting and discussion criteria require a publicly accessible issue tracker.
-The badge cannot be awarded until the repository is public or the project is
-developed in a public repository. Everything else in this draft is written so a
-maintainer can submit it after that change.
+The repository is **public** at `github.com/jawaracloud/skopos` (visibility
+changed on 2026-11-01). The passing criterion `repo_public` is now met, and the
+public issue tracker, security advisory form, and commit history are
+accessible to an assessor. The badge has **not** been submitted or awarded; a
+maintainer still has to submit this draft at <https://www.bestpractices.dev/>.
 
 Other known gaps that are **not** hidden by this draft:
 
@@ -25,13 +24,13 @@ Other known gaps that are **not** hidden by this draft:
   an 11-case Loki corpus, documented honestly in `docs/beta-gates.md`.
 - Two OSV entries exist for `golang.org/x/net` v0.60.0 in `go.sum`;
   `govulncheck` reports no reachable vulnerabilities. See
-  [openssf-scorecard.md](openssf-scorecard.md#snapshot-2026-11-01).
+  [openssf-scorecard.md](openssf-scorecard.md#snapshots).
 
 ## Status legend
 
 - **Met** — evidence exists and is verifiable in the repository or CI.
 - **Met (...)** — the core evidence exists with the limitation named in the
-  evidence column. For example, `Met (public pending)` means an external
+  evidence column. For example, `Met` means an external
   assessor cannot verify it until the repository is public.
 - **Not met** — the criterion is not satisfied.
 - **N/A** — not applicable; reason given.
@@ -44,7 +43,7 @@ Other known gaps that are **not** hidden by this draft:
 | ID | Status | Evidence and action |
 | --- | --- | --- |
 | `description_good` | Met | `README.md` explains the problem: Grafana-native metrics, traces, and logs on OBI + Collector + ClickHouse, without a new UI. |
-| `interact` | Met (public pending) | `README.md` has install/build instructions, `CONTRIBUTING.md` explains contribution, and `.github/ISSUE_TEMPLATE/` provides feedback forms. Public access is blocked by repository visibility. |
+| `interact` | Met | `README.md` has install/build instructions, `CONTRIBUTING.md` explains contribution, and `.github/ISSUE_TEMPLATE/` provides feedback forms. |
 | `contribution` | Met | `CONTRIBUTING.md` describes the PR/test/review process, including the human review gates. |
 | `contribution_requirements` | Met | `CONTRIBUTING.md` lists tests-first, exact-value tests, no silent skips, dependency policy, and the "one PR, one change" rule. |
 | `floss_license` | Met | Apache-2.0 in `LICENSE`. |
@@ -53,7 +52,7 @@ Other known gaps that are **not** hidden by this draft:
 | `documentation_basics` | Met | `README.md`, `docs/install.md`, `docs/support-matrix.md`, and the per-language support pages. |
 | `documentation_interface` | Met (caveat) | `docs/support-matrix.md`, `docs/promql-support.md`, `docs/traceql-support.md`, `docs/logql-support.md`, and `docs/install.md` describe endpoints, supported inputs, chart values, and explicit unsupported behavior. There is no formal OpenAPI document. |
 | `sites_https` | Met | GitHub repository and documentation URLs are HTTPS. |
-| `discussion` | Met (public pending) | GitHub Issues are enabled and URL-addressable; `.github/ISSUE_TEMPLATE/` covers bug reports and feature requests. GitHub Discussions is disabled, which is acceptable because Issues provide the required mechanism. |
+| `discussion` | Met | GitHub Issues are enabled and URL-addressable; `.github/ISSUE_TEMPLATE/` covers bug reports and feature requests. GitHub Discussions is disabled, which is acceptable because Issues provide the required mechanism. |
 | `english` | Met | All project documentation and issue templates are in English. |
 | `maintained` | Met | Recent commits (latest 2026-11-01) and active CI. The Scorecard "created within 90 days" warning is repository age, not inactivity. |
 
@@ -61,7 +60,7 @@ Other known gaps that are **not** hidden by this draft:
 
 | ID | Status | Evidence and action |
 | --- | --- | --- |
-| `repo_public` | **Not met** | The repository is private. This is the hard blocker. Make it public or move development to a public repository before submitting. |
+| `repo_public` | **Met** | The repository is public at `github.com/jawaracloud/skopos` as of 2026-11-01. |
 | `repo_track` | Met | Git history records author, timestamp, and change in every commit. |
 | `repo_interim` | Met | The repository contains dozens of incremental commits and feature branches, not only final release snapshots. |
 | `repo_distributed` | Met | Git is used. |
@@ -75,13 +74,13 @@ Other known gaps that are **not** hidden by this draft:
 
 | ID | Status | Evidence and action |
 | --- | --- | --- |
-| `report_process` | Met (public pending) | GitHub Issues plus `.github/ISSUE_TEMPLATE/bug_report.yml`; security reports use the private process in `SECURITY.md`. |
+| `report_process` | Met | GitHub Issues plus `.github/ISSUE_TEMPLATE/bug_report.yml`; security reports use the private process in `SECURITY.md`. |
 | `report_tracker` | Met | GitHub Issues is enabled. |
 | `report_responses` | Not demonstrated | There are zero issues in the repository, so there is no majority-response history in the last 2–12 months. Do not claim this until public reports exist and are answered. |
 | `enhancement_responses` | Not demonstrated | Same as above; no enhancement requests exist yet. |
-| `report_archive` | Met (public pending) | GitHub Issues is the searchable archive once the repository is public. |
+| `report_archive` | Met | GitHub Issues is the searchable archive. |
 | `vulnerability_report_process` | Met | `SECURITY.md` explains the private advisory process and supported versions. |
-| `vulnerability_report_private` | Met (public pending) | `SECURITY.md` links the GitHub private advisory form at `https://github.com/jawaracloud/skopos/security/advisories/new`. External reporters can use it after the repository is public. |
+| `vulnerability_report_private` | Met | `SECURITY.md` links the GitHub private advisory form at `https://github.com/jawaracloud/skopos/security/advisories/new`. External reporters can use it now. |
 | `vulnerability_report_response` | Not demonstrated | No vulnerability reports exist, so there is no response history. `SECURITY.md` now states 7-day acknowledgement, 14-day initial assessment, and 90-day default disclosure targets. The maintainer must honor them. |
 
 ## Quality
@@ -121,14 +120,14 @@ Other known gaps that are **not** hidden by this draft:
 | `delivery_unsigned` | N/A | No cryptographic hashes are published over HTTP. Release checksums are inside the release artifacts; no release exists yet. |
 | `vulnerabilities_fixed_60_days` | Met (caveat) | `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). Scorecard's OSV scan flags `golang.org/x/net` v0.60.0 in `go.sum`; it is not in `vendor/modules.txt`. Update it in the next human-reviewed dependency PR. |
 | `vulnerabilities_critical_fixed` | N/A | No critical vulnerabilities have been reported. |
-| `no_leaked_credentials` | Met (audit) | Gitleaks v8.30.1 scanned the repository history on 2026-11-01 and found no leaks. GitHub secret scanning is not available on a Free private repository, so this is a point-in-time audit, not continuous coverage. Re-run before publication and enable secret scanning when public. |
+| `no_leaked_credentials` | Met | Gitleaks v8.30.1 scanned all 27 commits and the working tree on 2026-11-01 with no leaks. GitHub secret scanning and push protection are enabled on the public repository; the repository also has private vulnerability reporting and Dependabot alerts/security updates. |
 
 ## Analysis
 
 | ID | Status | Evidence and action |
 | --- | --- | --- |
 | `static_analysis` | Met | `go vet ./...` is a static analysis tool beyond compiler warnings and runs on every push/PR. `actionlint` is used for workflow changes. |
-| `static_analysis_common_vulnerabilities` | Not met | No CodeQL, gosec, or staticcheck security rules. `govulncheck` covers known dependency vulnerabilities, not source-level common weaknesses. CodeQL on a private repository requires GHAS. |
+| `static_analysis_common_vulnerabilities` | Met | Default CodeQL setup for Go was enabled on 2026-11-01; the first analysis completed successfully and uploads SARIF to code scanning. `govulncheck` covers dependency vulnerabilities separately. |
 | `static_analysis_fixed` | N/A | No confirmed medium-or-higher static-analysis finding is open. |
 | `static_analysis_often` | Met | `ci.yml` runs `go vet` on every push and pull request. |
 | `dynamic_analysis` | Met | Unit tests, race detector, ClickHouse integration tests, SQL emitter fuzzing, OBI e2e (manual), and reference differentials. |
@@ -145,7 +144,7 @@ are not in this repository.
 The most important answers to get right:
 
 - **Repo URL:** only after the repository is public.
-- **Discussion:** GitHub Issues URL (not a private repository URL).
+- **Discussion:** the public GitHub Issues URL.
 - **Contribution:** `CONTRIBUTING.md`.
 - **Security:** `SECURITY.md` and the private advisory URL.
 - **Build/test:** `Makefile`, `.github/workflows/ci.yml`, and the exact commands

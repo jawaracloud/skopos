@@ -13,8 +13,8 @@ reproducible on the pinned references.
 | Distributed read path | **Passed for alpha** | `SKOPOS_MODE=all|query|worker|frontend`; unit and proxy smoke tests; Helm renders default, distributed, and combined storage; CI renders the distributed shape. | Add a multi-replica load test and a real ClickHouse frontend/query e2e. The frontend still has no auth. |
 | S3 tiered retention and backup | **Passed on host** | ClickHouse 26.8 + RustFS 1.0.4: cold part queryable, `idx_body` EXPLAIN, 52 backup objects, restore to a new database returned the same rows. `test/integration/s3/run.sh`; CI runs it. | Re-run with real cloud S3 and a scheduled restore drill. The chart does not create buckets. |
 | LogQL full-text pushdown | **Passed for supported subset** | `internal/loki` pushes selector and line-filter predicates; 67 log + 4 metric + 12 metadata integration cases are byte-identical to the unfiltered path. `match(Body, ...)` uses `idx_body`; `position` is exact but not index-assisted. | Add more regex/token cases and measure real-data index selectivity. `|=` is not token search. |
-| OpenSSF Scorecard | **Measured baseline** | Pinned Scorecard CLI v5.6.0 reports **6.5** on current `main` after Dependabot, least-privilege permissions, and SHA-pinned workflows; JSON artifact workflow, no GHAS required. | Re-score after future workflow changes. Branch-Protection is unavailable on a private Free repo; CI/Code-Review need PR history; releases/signing would improve Packaging and Signed-Releases. |
-| OpenSSF Best Practices | **Application ready; badge blocked** | `docs/openssf-best-practices.md` covers all 67 passing-level criteria honestly: 40 met/caveat, 15 N/A, 5 not met, 3 not demonstrated, 2 human, 2 partial. | `repo_public` is a MUST and the repo is private. Make it public (or use a public mirror), then submit the badge application. |
+| OpenSSF Scorecard | **Measured, public** | Official `ossf/scorecard-action` reports **7.1** on public `main` (run `41282506996`) and publishes the badge. Branch-Protection reads `-1` with `GITHUB_TOKEN`; add the optional `SCORECARD_TOKEN` fine-grained PAT with Administration read to score it. | Increase Code-Review/CI-Tests by using PRs; publish signed releases for Packaging/Signed-Releases; keep CodeQL clean; fix the `golang.org/x/net` OSV entries. |
+| OpenSSF Best Practices | **Application ready; submit manually** | `docs/openssf-best-practices.md` covers all 67 passing-level criteria honestly: 42 met/caveat, 15 N/A, 3 not met, 3 not demonstrated, 2 human, 2 partial. `repo_public` is now met. | A maintainer must submit at bestpractices.dev and answer the human-attestation criteria. Release, version tags, and release notes are still not met; CodeQL is enabled. |
 | SQL golden + fuzz emitter | **Passed** | Golden SQL tests and 30s fuzz gate; user values never appear as literals. CI blocking. | Human security review of emitter/escaping before beta. |
 | `govulncheck` + module checksums + vendor | **Passed** | CI runs govulncheck v1.9.0, `go mod verify`, and vendor drift. | Re-run on every dependency bump. |
 | `helm lint` + render | **Passed** | Helm 3.22.1 and 4.3.1; CI renders default, overrides, digest-pinned gateway, distributed frontend/query, and storage/backup shapes. | — |
@@ -56,6 +56,6 @@ reproducible on the pinned references.
   TTLs. The cerberus and OBI schema renderers were updated to handle the new
   Helm conditionals; a renderer regression caused the three-way seed to fail
   until both were fixed.
-- The official Scorecard action needs GHAS on private repos. The default path
-  is the pinned CLI and a JSON artifact; the GHAS-only action is manual and
-  gated, so normal CI cannot fail because GHAS is absent.
+- The repository became public on 2026-11-01, so the official Scorecard action
+  now runs with published results and SARIF. The CLI remains the local fallback;
+  the optional `SCORECARD_TOKEN` is only needed to score Branch-Protection.
