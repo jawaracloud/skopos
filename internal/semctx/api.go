@@ -47,8 +47,9 @@ var allowedRoles = map[string]struct{}{
 // API serves the compact context endpoints. It is intentionally separate from
 // the Prometheus/Loki/Tempo query handlers.
 type API struct {
-	Catalog  *Catalog
-	Observer Observer
+	Catalog        *Catalog
+	Observer       Observer
+	SignalObserver SignalObserver
 }
 
 // NewAPI returns a context API. A nil catalog becomes an empty catalog.
@@ -463,6 +464,8 @@ type suggestedMetric struct {
 type observedCoverage struct {
 	Metrics  int      `json:"metrics"`
 	Coverage float64  `json:"coverage"`
+	Logs     int      `json:"logs,omitempty"`
+	Traces   int      `json:"traces,omitempty"`
 	Flags    []string `json:"flags,omitempty"`
 }
 
@@ -677,6 +680,37 @@ func (a *API) handleCoverage(w http.ResponseWriter, r *http.Request) {
 				out.Alerts = append(out.Alerts, coverageAlert{
 					Signal: "metrics", Kind: "low_coverage",
 					Documented: len(a.Catalog.Metrics), Observed: len(observed),
+					Threshold: minCoverage,
+				})
+			}
+		}
+	}
+	if includeObserved && a.SignalObserver != nil {
+		logs, logsErr := a.SignalObserver.ListObservedLogs(r.Context())
+		traces, tracesErr := a.SignalObserver.ListObservedTraces(r.Context())
+		if out.Observed == nil {
+			out.Observed = &observedCoverage{}
+		}
+		if logsErr != nil {
+			out.Observed.Flags = append(out.Observed.Flags, "observed_logs_unavailable")
+		} else {
+			out.Observed.Logs = len(logs)
+			if len(logs) > 0 && float64(len(a.Catalog.Logs))/float64(len(logs)) < minCoverage {
+				out.Alerts = append(out.Alerts, coverageAlert{
+					Signal: "logs", Kind: "low_coverage",
+					Documented: len(a.Catalog.Logs), Observed: len(logs),
+					Threshold: minCoverage,
+				})
+			}
+		}
+		if tracesErr != nil {
+			out.Observed.Flags = append(out.Observed.Flags, "observed_traces_unavailable")
+		} else {
+			out.Observed.Traces = len(traces)
+			if len(traces) > 0 && float64(len(a.Catalog.Traces))/float64(len(traces)) < minCoverage {
+				out.Alerts = append(out.Alerts, coverageAlert{
+					Signal: "traces", Kind: "low_coverage",
+					Documented: len(a.Catalog.Traces), Observed: len(traces),
 					Threshold: minCoverage,
 				})
 			}

@@ -180,7 +180,9 @@ adds caveats and provenance.
 `?observed=true` to include observed metric counts and a documented/observed
 coverage ratio from ClickHouse. If the observation source is unavailable, the
 response carries `observed_unavailable` rather than failing the documented
-counts. `min` (default `0.8`) controls whether a low-coverage alert is emitted.
+counts. When the gateway can query ClickHouse, `observed.logs` and
+`observed.traces` contain observed stream/operation counts. `min` (default
+`0.8`) controls whether low-coverage alerts are emitted.
 
 `GET /api/v1/context/suggestions` lists observed-only metrics that have no
 catalog entry. It proposes observed type/unit/description only, sets
@@ -382,10 +384,11 @@ internet.
 This keeps the model context small: one compact service card, one compact
 signal card, then a query.
 
-## Phase 4 (remaining)
+## Remaining beyond Phase 4
 
 - Resumability for interrupted SSE streams.
-- Observed log/trace metadata, not only observed metrics.
+- Observed log/trace context cards (coverage counts for observed logs/traces
+  are already included).
 - A reviewed write/apply path for suggestions (the API currently only proposes
   them; it never writes the catalog).
 - External delivery of coverage alerts to monitoring.

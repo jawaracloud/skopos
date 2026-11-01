@@ -119,6 +119,7 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 	}
 	if cfg.ContextObserved {
 		contextAPI.WithObserver(newContextObserver(fetcher, logger))
+		contextAPI.WithSignalObserver(newObservedSignals(client, cfg.ClickHouseDatabase, cfg.Tables, logger))
 	}
 	promEngine := prom.NewEngine(fetcher)
 	promEngine.MaxSamples = int(cfg.MaxScanRows)
