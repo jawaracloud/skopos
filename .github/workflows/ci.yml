@@ -117,6 +117,15 @@ jobs:
           grep -q 'always_on: {}' /tmp/skopos-obi.yaml
       - name: Render default values
         run: helm template skopos deploy/helm/skopos --namespace observability > /tmp/skopos-default.yaml
+      - name: Render distributed frontend and query
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set distributed.enabled=true \
+            --set frontend.replicaCount=2 \
+            --set query.replicaCount=2 > /tmp/skopos-distributed.yaml
+          grep -q 'SKOPOS_MODE' /tmp/skopos-distributed.yaml
+          grep -q 'component: frontend' /tmp/skopos-distributed.yaml
+          grep -q 'component: query' /tmp/skopos-distributed.yaml
       - name: Render overrides
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
