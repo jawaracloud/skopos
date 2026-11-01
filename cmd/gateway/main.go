@@ -14,6 +14,7 @@ import (
 
 	"github.com/jawaracloud/skopos/internal/chclient"
 	"github.com/jawaracloud/skopos/internal/config"
+	"github.com/jawaracloud/skopos/internal/frontend"
 	"github.com/jawaracloud/skopos/internal/httpapi"
 	"github.com/jawaracloud/skopos/internal/loki"
 	"github.com/jawaracloud/skopos/internal/plan"
@@ -39,6 +40,43 @@ func run() error {
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel}))
 
+	if cfg.Mode == config.ModeFrontend {
+		return runFrontend(cfg, logger)
+	}
+	return runQueries(cfg, logger)
+}
+
+func runFrontend(cfg config.Config, logger *slog.Logger) error {
+	fe, err := frontend.New(frontend.Config{
+		Logger:           logger,
+		Backends:         cfg.QueryURLs,
+		Version:          version,
+		ReadinessTimeout: cfg.ReadinessTimeout,
+		ProxyTimeout:     cfg.QueryTimeout,
+		MaxRequestBytes:  cfg.MaxRequestBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("frontend: %w", err)
+	}
+
+	queryURLs := make([]string, 0, len(cfg.QueryURLs))
+	for _, raw := range cfg.QueryURLs {
+		queryURLs = append(queryURLs, redactURL(raw))
+	}
+	logger.Info("starting gateway frontend",
+		"version", version,
+		"mode", string(cfg.Mode),
+		"role", "frontend",
+		"addr", cfg.ListenAddr,
+		"query_urls", queryURLs,
+		"query_timeout", cfg.QueryTimeout.String(),
+		"readiness_timeout", cfg.ReadinessTimeout.String(),
+	)
+
+	return serve(cfg.ListenAddr, fe.Handler(), logger)
+}
+
+func runQueries(cfg config.Config, logger *slog.Logger) error {
 	client, err := chclient.New(chclient.Config{
 		BaseURL:          cfg.ClickHouseURL,
 		Database:         cfg.ClickHouseDatabase,
@@ -98,9 +136,35 @@ func run() error {
 		return fmt.Errorf("http api: %w", err)
 	}
 
+	attrs := []any{
+		"version", version,
+		"mode", string(cfg.Mode),
+		"addr", cfg.ListenAddr,
+		"clickhouse_url", redactURL(cfg.ClickHouseURL),
+		"database", cfg.ClickHouseDatabase,
+		"read_only_user", cfg.ClickHouseUser,
+		"tables", cfg.Tables,
+		"promql", true,
+		"traceql", true,
+		"logql", true,
+	}
+	switch cfg.Mode {
+	case config.ModeWorker:
+		// SKOPOS_MODE=worker is the documented alias for the query worker role.
+		logger.Info("starting query worker (SKOPOS_MODE=worker is an alias for query)", attrs...)
+	case config.ModeQuery:
+		logger.Info("starting query worker", attrs...)
+	default:
+		logger.Info("starting gateway", attrs...)
+	}
+
+	return serve(cfg.ListenAddr, api.Handler(), logger)
+}
+
+func serve(addr string, handler http.Handler, logger *slog.Logger) error {
 	srv := &http.Server{
-		Addr:              cfg.ListenAddr,
-		Handler:           api.Handler(),
+		Addr:              addr,
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -111,18 +175,6 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-
-	logger.Info("starting gateway",
-		"version", version,
-		"addr", cfg.ListenAddr,
-		"clickhouse_url", redactURL(cfg.ClickHouseURL),
-		"database", cfg.ClickHouseDatabase,
-		"read_only_user", cfg.ClickHouseUser,
-		"tables", cfg.Tables,
-		"promql", true,
-		"traceql", true,
-		"logql", true,
-	)
 
 	errCh := make(chan error, 1)
 	go func() {

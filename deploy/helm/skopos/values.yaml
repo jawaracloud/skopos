@@ -166,6 +166,9 @@ obi:
 
 gateway:
   enabled: true
+  # all: query heads and public API in one process (default, current behavior).
+  # frontend: proxy only, no ClickHouse. query/worker: internal query workers.
+  mode: all
   replicaCount: 1
   image:
     repository: ghcr.io/jawaracloud/skopos-gateway
@@ -213,6 +216,58 @@ gateway:
       periodSeconds: 5
       timeoutSeconds: 2
       failureThreshold: 3
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+# Split the read path into a public frontend and an internal query tier. When
+# disabled, the single gateway Deployment/Service above is rendered unchanged.
+distributed:
+  enabled: false
+
+# Public frontend tier (used only when distributed.enabled=true). It reuses the
+# gateway image, security context, probes, and shared config values.
+frontend:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  config:
+    # Bounded timeout for each proxied query request.
+    queryTimeout: 30s
+    # Timeout for probing query workers' /readyz from the frontend. Keep this
+    # below gateway.probes.readiness.timeoutSeconds so the kubelet probe does
+    # not time out first.
+    readinessTimeout: 1s
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  extraEnv: []
+
+# Internal query worker tier (used only when distributed.enabled=true). Worker
+# pods use the same ClickHouse credentials and limits as the single gateway.
+query:
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8080
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
   podAnnotations: {}
   nodeSelector: {}
   tolerations: []

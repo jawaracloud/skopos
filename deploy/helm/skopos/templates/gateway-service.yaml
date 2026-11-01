@@ -9,7 +9,11 @@ metadata:
 spec:
   type: {{ .Values.gateway.service.type }}
   selector:
+    {{- if .Values.distributed.enabled }}
+    {{- include "skopos.componentLabels" (dict "root" . "component" "frontend") | nindent 4 }}
+    {{- else }}
     {{- include "skopos.componentLabels" (dict "root" . "component" "gateway") | nindent 4 }}
+    {{- end }}
   ports:
     - name: http
       port: {{ .Values.gateway.service.port }}

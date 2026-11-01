@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -12,8 +13,31 @@ import (
 	"github.com/jawaracloud/skopos/internal/plan"
 )
 
+// Mode selects which part of the query path this process serves.
+type Mode string
+
+const (
+	// ModeAll serves the query heads and the public API in one process.
+	ModeAll Mode = "all"
+	// ModeQuery serves only the query heads. It is the query worker role.
+	ModeQuery Mode = "query"
+	// ModeWorker is an explicit alias for ModeQuery, documented as the query
+	// worker mode.
+	ModeWorker Mode = "worker"
+	// ModeFrontend serves health/version locally and proxies query traffic to
+	// one or more query workers.
+	ModeFrontend Mode = "frontend"
+)
+
+// ServeQueries reports whether the mode registers the Prometheus, Tempo, and
+// Loki query heads.
+func (m Mode) ServeQueries() bool {
+	return m == ModeAll || m == ModeQuery || m == ModeWorker
+}
+
 // Config is the gateway runtime configuration.
 type Config struct {
+	Mode               Mode
 	ListenAddr         string
 	ClickHouseURL      string
 	ClickHouseDatabase string
@@ -29,6 +53,8 @@ type Config struct {
 	MaxResponseBytes   int64
 	ReadinessTimeout   time.Duration
 	MaxRequestBytes    int64
+	QueryURLs          []string
+	QueryTimeout       time.Duration
 	LogLevel           slog.Level
 }
 
@@ -41,6 +67,7 @@ func FromEnv() (Config, error) {
 // to mutate the process environment.
 func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	cfg := Config{
+		Mode:               ModeAll,
 		ListenAddr:         ":8080",
 		ClickHouseURL:      "http://127.0.0.1:8123",
 		ClickHouseDatabase: "otel",
@@ -55,10 +82,18 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		MaxResponseBytes:   64 << 20,
 		ReadinessTimeout:   2 * time.Second,
 		MaxRequestBytes:    1 << 20,
+		QueryTimeout:       30 * time.Second,
 		LogLevel:           slog.LevelInfo,
 	}
 
-	var err error
+	mode, err := stringEnv(lookup, "SKOPOS_MODE", string(ModeAll))
+	if err != nil {
+		return Config{}, err
+	}
+	if cfg.Mode, err = ParseMode(mode); err != nil {
+		return Config{}, err
+	}
+
 	if cfg.ListenAddr, err = stringEnv(lookup, "SKOPOS_LISTEN_ADDR", cfg.ListenAddr); err != nil {
 		return Config{}, err
 	}
@@ -119,8 +154,21 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.ReadinessTimeout, err = durationEnv(lookup, "SKOPOS_READINESS_TIMEOUT", cfg.ReadinessTimeout); err != nil {
 		return Config{}, err
 	}
+	if cfg.QueryTimeout, err = durationEnv(lookup, "SKOPOS_QUERY_TIMEOUT", cfg.QueryTimeout); err != nil {
+		return Config{}, err
+	}
 	if cfg.MaxRequestBytes, err = intEnv(lookup, "SKOPOS_MAX_REQUEST_BYTES", cfg.MaxRequestBytes); err != nil {
 		return Config{}, err
+	}
+	if cfg.Mode == ModeFrontend {
+		raw, err := stringEnv(lookup, "SKOPOS_QUERY_URLS", "")
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.QueryURLs, err = ParseQueryURLs(raw)
+		if err != nil {
+			return Config{}, err
+		}
 	}
 	level, err := stringEnv(lookup, "SKOPOS_LOG_LEVEL", "info")
 	if err != nil {
@@ -151,6 +199,12 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.ReadinessTimeout <= 0 {
 		return Config{}, fmt.Errorf("SKOPOS_READINESS_TIMEOUT: must be positive")
 	}
+	if cfg.QueryTimeout <= 0 {
+		return Config{}, fmt.Errorf("SKOPOS_QUERY_TIMEOUT: must be positive")
+	}
+	if cfg.Mode == ModeFrontend && len(cfg.QueryURLs) == 0 {
+		return Config{}, fmt.Errorf("SKOPOS_QUERY_URLS: at least one URL is required in frontend mode")
+	}
 	if cfg.MaxMemoryUsage == 0 || cfg.MaxRowsToRead == 0 || cfg.MaxResultRows == 0 ||
 		cfg.MaxScanRows == 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
 		return Config{}, fmt.Errorf("SKOPOS limits must be positive")
@@ -159,6 +213,54 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("SKOPOS_MAX_QUERY_RANGE: must be positive")
 	}
 	return cfg, nil
+}
+
+// ParseMode parses SKOPOS_MODE. An empty value means ModeAll.
+func ParseMode(raw string) (Mode, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(ModeAll):
+		return ModeAll, nil
+	case string(ModeQuery):
+		return ModeQuery, nil
+	case string(ModeWorker):
+		return ModeWorker, nil
+	case string(ModeFrontend):
+		return ModeFrontend, nil
+	default:
+		return "", fmt.Errorf("SKOPOS_MODE: unsupported mode %q (want all, query, worker, or frontend)", raw)
+	}
+}
+
+// ParseQueryURLs parses and validates the comma-separated SKOPOS_QUERY_URLS
+// value. Each entry must be an absolute http(s) base URL. Empty entries are
+// ignored; trailing slashes are normalized away.
+func ParseQueryURLs(raw string) ([]string, error) {
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		u, err := url.Parse(part)
+		if err != nil {
+			return nil, fmt.Errorf("SKOPOS_QUERY_URLS: invalid URL %q: %w", part, err)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return nil, fmt.Errorf("SKOPOS_QUERY_URLS: %q must use http or https", part)
+		}
+		if u.Host == "" {
+			return nil, fmt.Errorf("SKOPOS_QUERY_URLS: %q has no host", part)
+		}
+		if u.Fragment != "" {
+			return nil, fmt.Errorf("SKOPOS_QUERY_URLS: %q must not contain a fragment", part)
+		}
+		u.Path = strings.TrimRight(u.Path, "/")
+		out = append(out, u.String())
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("SKOPOS_QUERY_URLS: at least one URL is required in frontend mode")
+	}
+	return out, nil
 }
 
 func stringEnv(lookup func(string) (string, bool), key, fallback string) (string, error) {

@@ -1,0 +1,109 @@
+{{- if and .Values.gateway.enabled .Values.distributed.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skopos.query.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: query
+spec:
+  replicas: {{ .Values.query.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "query") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: query
+      {{- with .Values.query.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.gateway.podSecurityContext | nindent 8 }}
+      {{- with .Values.query.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.query.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.query.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: query
+          image: {{ include "skopos.image" (dict "image" .Values.gateway.image) | quote }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.gateway.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.query.service.port }}
+              protocol: TCP
+          env:
+            - name: SKOPOS_MODE
+              value: "query"
+            - name: SKOPOS_LISTEN_ADDR
+              value: ":{{ .Values.query.service.port }}"
+            - name: SKOPOS_CLICKHOUSE_URL
+              value: "http://{{ include "skopos.clickhouse.host" . }}:{{ .Values.clickhouse.service.httpPort }}"
+            - name: SKOPOS_CLICKHOUSE_DATABASE
+              value: {{ .Values.clickhouse.database | quote }}
+            - name: SKOPOS_CLICKHOUSE_USER
+              value: {{ .Values.clickhouse.auth.gatewayUser | quote }}
+            - name: SKOPOS_TABLE_TRACES
+              value: {{ .Values.clickhouse.tables.traces | quote }}
+            - name: SKOPOS_TABLE_LOGS
+              value: {{ .Values.clickhouse.tables.logs | quote }}
+            - name: SKOPOS_TABLE_METRICS_GAUGE
+              value: {{ .Values.clickhouse.tables.metricsGauge | quote }}
+            - name: SKOPOS_TABLE_METRICS_SUM
+              value: {{ .Values.clickhouse.tables.metricsSum | quote }}
+            - name: SKOPOS_TABLE_METRICS_HISTOGRAM
+              value: {{ .Values.clickhouse.tables.metricsHistogram | quote }}
+            - name: SKOPOS_TABLE_METRICS_EXPONENTIAL_HISTOGRAM
+              value: {{ .Values.clickhouse.tables.metricsExponentialHistogram | quote }}
+            - name: SKOPOS_TABLE_METRICS_SUMMARY
+              value: {{ .Values.clickhouse.tables.metricsSummary | quote }}
+            - name: SKOPOS_CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.clickhouse.secretName" . }}
+                  key: gateway-password
+            - name: SKOPOS_CLICKHOUSE_MAX_EXECUTION_TIME
+              value: {{ printf "%ds" (int64 .Values.clickhouse.limits.maxExecutionTimeSeconds) | quote }}
+            - name: SKOPOS_CLICKHOUSE_MAX_MEMORY_USAGE
+              value: {{ .Values.clickhouse.limits.maxMemoryUsageBytes | int64 | quote }}
+            - name: SKOPOS_CLICKHOUSE_MAX_ROWS_TO_READ
+              value: {{ .Values.clickhouse.limits.maxRowsToRead | int64 | quote }}
+            - name: SKOPOS_CLICKHOUSE_MAX_RESULT_ROWS
+              value: {{ .Values.clickhouse.limits.maxResultRows | int64 | quote }}
+            - name: SKOPOS_CLICKHOUSE_MAX_RESPONSE_BYTES
+              value: {{ .Values.gateway.config.maxResponseBytes | int64 | quote }}
+            - name: SKOPOS_READINESS_TIMEOUT
+              value: {{ .Values.gateway.config.readinessTimeout | quote }}
+            - name: SKOPOS_MAX_REQUEST_BYTES
+              value: {{ .Values.gateway.config.maxRequestBytes | int64 | quote }}
+            - name: SKOPOS_LOG_LEVEL
+              value: {{ .Values.gateway.config.logLevel | quote }}
+            {{- with .Values.query.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.gateway.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            {{- toYaml .Values.gateway.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.query.resources | nindent 12 }}
+{{- end }}

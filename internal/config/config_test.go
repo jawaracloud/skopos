@@ -106,6 +106,9 @@ func TestInvalidValues(t *testing.T) {
 		{"scan rows", "SKOPOS_MAX_SCAN_ROWS", "0", "SKOPOS limits"},
 		{"query range", "SKOPOS_MAX_QUERY_RANGE", "soon", "SKOPOS_MAX_QUERY_RANGE"},
 		{"empty listen", "SKOPOS_LISTEN_ADDR", "", "SKOPOS_LISTEN_ADDR"},
+		{"mode", "SKOPOS_MODE", "backend", "SKOPOS_MODE"},
+		{"query timeout", "SKOPOS_QUERY_TIMEOUT", "soon", "SKOPOS_QUERY_TIMEOUT"},
+		{"zero query timeout", "SKOPOS_QUERY_TIMEOUT", "0s", "SKOPOS_QUERY_TIMEOUT"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -117,5 +120,137 @@ func TestInvalidValues(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestParseMode(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want Mode
+	}{
+		{"", ModeAll},
+		{"all", ModeAll},
+		{"ALL", ModeAll},
+		{" query ", ModeQuery},
+		{"query", ModeQuery},
+		{"worker", ModeWorker},
+		{"WORKER", ModeWorker},
+		{"frontend", ModeFrontend},
+	}
+	for _, tc := range tests {
+		got, err := ParseMode(tc.raw)
+		if err != nil {
+			t.Fatalf("ParseMode(%q): %v", tc.raw, err)
+		}
+		if got != tc.want {
+			t.Fatalf("ParseMode(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	if _, err := ParseMode("backend"); err == nil || !strings.Contains(err.Error(), "SKOPOS_MODE") {
+		t.Fatalf("ParseMode(backend) error = %v", err)
+	}
+}
+
+func TestModeServeQueries(t *testing.T) {
+	for _, mode := range []Mode{ModeAll, ModeQuery, ModeWorker} {
+		if !mode.ServeQueries() {
+			t.Errorf("%s should serve queries", mode)
+		}
+	}
+	if ModeFrontend.ServeQueries() {
+		t.Error("frontend must not serve queries directly")
+	}
+}
+
+func TestFrontendModeDefaults(t *testing.T) {
+	cfg, err := FromLookup(lookupFrom(map[string]string{
+		"SKOPOS_MODE":          "frontend",
+		"SKOPOS_QUERY_URLS":    "http://query:8080",
+		"SKOPOS_QUERY_TIMEOUT": "12s",
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup: %v", err)
+	}
+	if cfg.Mode != ModeFrontend {
+		t.Fatalf("Mode = %q", cfg.Mode)
+	}
+	if len(cfg.QueryURLs) != 1 || cfg.QueryURLs[0] != "http://query:8080" {
+		t.Fatalf("QueryURLs = %#v", cfg.QueryURLs)
+	}
+	if cfg.QueryTimeout != 12*time.Second {
+		t.Fatalf("QueryTimeout = %s", cfg.QueryTimeout)
+	}
+}
+
+func TestFrontendRequiresQueryURLs(t *testing.T) {
+	for _, urls := range []string{"", " , , "} {
+		_, err := FromLookup(lookupFrom(map[string]string{
+			"SKOPOS_MODE":       "frontend",
+			"SKOPOS_QUERY_URLS": urls,
+		}))
+		if err == nil || !strings.Contains(err.Error(), "SKOPOS_QUERY_URLS") {
+			t.Fatalf("SKOPOS_QUERY_URLS=%q error = %v", urls, err)
+		}
+	}
+}
+
+func TestParseQueryURLs(t *testing.T) {
+	got, err := ParseQueryURLs(" http://query-a:8080/ , https://query-b.example/skopos/, http://query-c:8080")
+	if err != nil {
+		t.Fatalf("ParseQueryURLs: %v", err)
+	}
+	want := []string{
+		"http://query-a:8080",
+		"https://query-b.example/skopos",
+		"http://query-c:8080",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ParseQueryURLs = %#v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("ParseQueryURLs[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseQueryURLsInvalid(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", "", "at least one URL"},
+		{"relative", "/query", "http or https"},
+		{"scheme", "ftp://query:8080", "http or https"},
+		{"host", "http://", "no host"},
+		{"fragment", "http://query:8080/#frag", "fragment"},
+		{"parse", "http://[::1", "invalid URL"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseQueryURLs(tc.raw)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %q does not contain %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestNonFrontendIgnoresQueryURLs(t *testing.T) {
+	for _, mode := range []string{"all", "query", "worker"} {
+		cfg, err := FromLookup(lookupFrom(map[string]string{
+			"SKOPOS_MODE":       mode,
+			"SKOPOS_QUERY_URLS": "not a url",
+		}))
+		if err != nil {
+			t.Fatalf("%s mode rejected SKOPOS_QUERY_URLS: %v", mode, err)
+		}
+		if len(cfg.QueryURLs) != 0 {
+			t.Fatalf("%s mode QueryURLs = %#v", mode, cfg.QueryURLs)
+		}
 	}
 }

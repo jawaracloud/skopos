@@ -1,0 +1,78 @@
+{{- if and .Values.gateway.enabled .Values.distributed.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "skopos.frontend.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  replicas: {{ .Values.frontend.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "frontend") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: frontend
+      {{- with .Values.frontend.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.gateway.podSecurityContext | nindent 8 }}
+      {{- with .Values.frontend.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.frontend.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: frontend
+          image: {{ include "skopos.image" (dict "image" .Values.gateway.image) | quote }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.gateway.securityContext | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.service.port }}
+              protocol: TCP
+          env:
+            - name: SKOPOS_MODE
+              value: "frontend"
+            - name: SKOPOS_LISTEN_ADDR
+              value: ":{{ .Values.frontend.service.port }}"
+            - name: SKOPOS_QUERY_URLS
+              value: "http://{{ include "skopos.query.fullname" . }}:{{ .Values.query.service.port }}"
+            - name: SKOPOS_QUERY_TIMEOUT
+              value: {{ .Values.frontend.config.queryTimeout | quote }}
+            - name: SKOPOS_READINESS_TIMEOUT
+              value: {{ .Values.frontend.config.readinessTimeout | quote }}
+            - name: SKOPOS_MAX_REQUEST_BYTES
+              value: {{ .Values.gateway.config.maxRequestBytes | int64 | quote }}
+            - name: SKOPOS_LOG_LEVEL
+              value: {{ .Values.gateway.config.logLevel | quote }}
+            {{- with .Values.frontend.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            {{- toYaml .Values.gateway.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            {{- toYaml .Values.gateway.probes.readiness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+{{- end }}
