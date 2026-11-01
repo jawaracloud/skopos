@@ -6,8 +6,9 @@ recorded here before it lands.
 
 ## Current Go dependencies
 
-M0-M2 used only the Go standard library. M3-M5 add the two provider-official
-dependencies approved by the ADR, plus their permissive transitive modules.
+M0-M2 used only the Go standard library. M3-M5 add two provider-official
+dependencies and the official protobuf runtime, plus their permissive
+transitive modules.
 `go.mod`, `go.sum`, and `vendor/` are committed. Builds use the vendored tree.
 
 | Module | Version | License | Owner | Why |

@@ -31,7 +31,14 @@ The v0.1 alpha test seams are:
   prove user values never become SQL literals.
 - `internal/chclient.Client.Query`: `httptest` unit tests and an integration test
   against a real ClickHouse server.
-- `internal/httpapi.Handler`: `/healthz` and `/readyz` behavior.
+- `internal/httpapi.Handler`: `/healthz` and `/readyz` behavior, plus route
+  registration for the three heads.
+- `internal/prom.Engine` and `internal/prom.ClickHouseFetcher`: PromQL
+  semantics, golden results, and real-ClickHouse queries.
+- `internal/tempo.ParseTraceQL`, `Search`, and the OTLP JSON/protobuf response:
+  TraceQL subset and wire-format tests.
+- `internal/loki.Parse` and the query/labels/series handlers: LogQL subset and
+  stream responses.
 - Helm chart: `helm lint` and `helm template` with default and override values.
 
 New seams need agreement in the PR description before tests are written.

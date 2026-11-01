@@ -2,6 +2,7 @@ package tempo
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -130,6 +131,48 @@ func TestTraceOTLPProtobuf(t *testing.T) {
 	}
 	if got := data.ResourceSpans[0].ScopeSpans[0].Spans[0].Name; got != "GET /checkout" {
 		t.Fatalf("span name = %q", got)
+	}
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+func TestTraceV2Envelope(t *testing.T) {
+	h, span := testAPI(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/traces/"+span.TraceID, nil)
+	req.Header.Set("Accept", "application/protobuf")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("v2 trace = %d %s", rec.Code, rec.Body)
+	}
+	body := rec.Body.Bytes()
+	if len(body) < 3 || body[0] != 0x0a {
+		t.Fatalf("v2 envelope missing field 1: %x", body[:min(8, len(body))])
+	}
+	length, n := binary.Uvarint(body[1:])
+	if n <= 0 || int(length) > len(body)-1-n {
+		t.Fatalf("v2 envelope length invalid: %d %d", length, n)
+	}
+	var data tracev1.TracesData
+	if err := proto.Unmarshal(body[1+n:1+n+int(length)], &data); err != nil {
+		t.Fatalf("unmarshal v2 trace: %v", err)
+	}
+	if len(data.ResourceSpans) != 1 {
+		t.Fatalf("v2 trace = %#v", &data)
+	}
+
+	rec = request(t, h, "/api/v2/traces/"+span.TraceID)
+	var jsonBody map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &jsonBody); err != nil {
+		t.Fatalf("decode v2 json: %v", err)
+	}
+	if _, ok := jsonBody["trace"].(map[string]any); !ok {
+		t.Fatalf("v2 json missing trace envelope: %#v", jsonBody)
 	}
 }
 

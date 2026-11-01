@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -209,5 +210,11 @@ func TestBadRequestsAndExecutionErrors(t *testing.T) {
 	rec := do(t, h, `/api/v1/query?query=x`)
 	if rec.Code != http.StatusInternalServerError || !strings.Contains(rec.Body.String(), "backend down") {
 		t.Fatalf("execution error = %d %s", rec.Code, rec.Body)
+	}
+
+	h = testAPI(fakeQueryEngine{err: fmt.Errorf("%w: parse query: bad", ErrBadQuery)}, fakeSeriesFetcher{})
+	rec = do(t, h, `/api/v1/query?query=x`)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bad_data") {
+		t.Fatalf("bad query = %d %s", rec.Code, rec.Body)
 	}
 }

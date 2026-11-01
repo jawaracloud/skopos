@@ -32,12 +32,14 @@ points all three datasource types at that service.
 
 ## Language support
 
-- **PromQL:** selectors, matchers, `rate`/`irate`/`increase`, range
-  aggregations, `histogram_quantile`, basic math, scalar/vector and one-to-one
-  vector/vector binary operators, `offset`, and the listed aggregations.
+- **PromQL:** selectors, matchers, `rate`/`irate`/`increase` with boundary
+  extrapolation, range aggregations, `histogram_quantile`, basic math,
+  scalar/vector and one-to-one vector/vector binary operators, `offset`, and
+  the listed aggregations. Only gauge, sum, and classic histogram tables are
+  read; summary and exponential-histogram metrics are not yet queryable.
 - **TraceQL:** one spanset, `&&`/`||`, tag matchers, status/kind/duration
   intrinsics, tag search, tags and tag values, trace by ID in OTLP JSON or
-  protobuf.
+  protobuf (v2 uses the Tempo `TraceByIDResponse` envelope).
 - **LogQL:** stream selectors and line filters. Parser stages and metric
   queries are rejected.
 

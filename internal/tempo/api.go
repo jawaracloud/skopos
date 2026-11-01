@@ -149,11 +149,15 @@ func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "trace not found")
 		return
 	}
+	isV2 := strings.HasPrefix(r.URL.Path, "/api/v2/")
 	if strings.Contains(r.Header.Get("Accept"), "application/protobuf") {
 		data, err := otlpProto(spans)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
+		}
+		if isV2 {
+			data = wrapTraceByIDResponse(data)
 		}
 		w.Header().Set("Content-Type", "application/protobuf")
 		w.WriteHeader(http.StatusOK)
@@ -164,6 +168,13 @@ func (a *API) handleTrace(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if isV2 {
+		data, err = json.Marshal(map[string]json.RawMessage{"trace": data})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
@@ -680,6 +691,30 @@ func protoSpan(span Span) *tracev1.Span {
 		})
 	}
 	return out
+}
+
+// wrapTraceByIDResponse wraps an OTLP TracesData message in the Tempo v2
+// TraceByIDResponse envelope. The envelope's field 1 is a Trace message whose
+// field 1 is the repeated ResourceSpans, which is exactly TracesData's body.
+// We encode it by hand to avoid importing Tempo's AGPL-licensed proto module.
+func wrapTraceByIDResponse(trace []byte) []byte {
+	out := []byte{0x0a}
+	out = append(out, encodeVarint(uint64(len(trace)))...)
+	out = append(out, trace...)
+	return out
+}
+
+func encodeVarint(v uint64) []byte {
+	var buf [10]byte
+	n := 0
+	for v >= 0x80 {
+		buf[n] = byte(v) | 0x80
+		v >>= 7
+		n++
+	}
+	buf[n] = byte(v)
+	n++
+	return buf[:n]
 }
 
 func decodeHex(value string) []byte {

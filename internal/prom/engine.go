@@ -36,7 +36,7 @@ func NewEngine(fetcher Fetcher) *Engine {
 func (e *Engine) Query(ctx context.Context, expr string, at time.Time) (Value, error) {
 	parsed, err := parser.NewParser(parser.Options{}).ParseExpr(expr)
 	if err != nil {
-		return nil, fmt.Errorf("prom: parse query: %w", err)
+		return nil, fmt.Errorf("%w: parse query: %v", ErrBadQuery, err)
 	}
 	span := maxSelectorSpan(parsed, e.lookback())
 	ec := &evalCtx{
@@ -75,7 +75,7 @@ func (e *Engine) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	}
 	parsed, err := parser.NewParser(parser.Options{}).ParseExpr(expr)
 	if err != nil {
-		return nil, fmt.Errorf("prom: parse query: %w", err)
+		return nil, fmt.Errorf("%w: parse query: %v", ErrBadQuery, err)
 	}
 	span := maxSelectorSpan(parsed, e.lookback())
 	base := &evalCtx{
@@ -216,19 +216,15 @@ func (e *evalCtx) evalVectorSelector(vs *parser.VectorSelector) (Value, error) {
 	startMs := start.UnixMilli()
 	out := make(Vector, 0, len(series))
 	for _, s := range series {
-		var last *Sample
-		for i := range s.Samples {
-			sample := &s.Samples[i]
-			if sample.T < startMs || sample.T > endMs {
-				continue
-			}
-			if last == nil || sample.T >= last.T {
-				last = sample
-			}
+		idx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T > endMs })
+		if idx == 0 {
+			continue
 		}
-		if last != nil {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: endMs, V: last.V})
+		last := s.Samples[idx-1]
+		if last.T < startMs {
+			continue
 		}
+		out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: e.at.UnixMilli(), SampleT: last.T, V: last.V})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out, nil
@@ -253,15 +249,12 @@ func (e *evalCtx) evalMatrixSelector(ms *parser.MatrixSelector) (Value, error) {
 	endMs := end.UnixMilli()
 	out := make(Matrix, 0, len(series))
 	for _, s := range series {
-		samples := make([]Sample, 0, len(s.Samples))
-		for _, sample := range s.Samples {
-			if sample.T >= startMs && sample.T <= endMs {
-				samples = append(samples, sample)
-			}
+		startIdx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T >= startMs })
+		endIdx := sort.Search(len(s.Samples), func(i int) bool { return s.Samples[i].T > endMs })
+		if startIdx >= endIdx {
+			continue
 		}
-		if len(samples) > 0 {
-			out = append(out, Series{Labels: cloneLabels(s.Labels), Samples: samples})
-		}
+		out = append(out, Series{Labels: cloneLabels(s.Labels), Samples: s.Samples[startIdx:endIdx]})
 	}
 	return out, nil
 }
@@ -305,7 +298,8 @@ func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
 		if err != nil {
 			return nil, err
 		}
-		return e.rateLike(name, matrix), nil
+		rangeStart, rangeEnd := e.matrixWindow(call)
+		return e.rateLike(name, matrix, rangeStart, rangeEnd), nil
 	case "avg_over_time", "min_over_time", "max_over_time", "sum_over_time",
 		"count_over_time", "last_over_time", "stddev_over_time", "stdvar_over_time",
 		"present_over_time":
@@ -353,7 +347,13 @@ func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
 		}
 		out := make(Vector, 0, len(v))
 		for _, s := range v {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: e.at.UnixMilli(), V: float64(s.T) / 1000})
+			labels := cloneLabels(s.Labels)
+			delete(labels, promlabels.MetricName)
+			stamp := s.SampleT
+			if stamp == 0 {
+				stamp = s.T
+			}
+			out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: float64(stamp) / 1000})
 		}
 		return out, nil
 	case "scalar":
@@ -435,13 +435,39 @@ func (e *evalCtx) evalScalar(expr parser.Expr) (Scalar, error) {
 	return s, nil
 }
 
-func (e *evalCtx) rateLike(name string, matrix Matrix) Vector {
+func (e *evalCtx) matrixWindow(call *parser.Call) (time.Time, time.Time) {
+	if len(call.Args) == 0 {
+		return e.at, e.at
+	}
+	arg := call.Args[0]
+	for {
+		paren, ok := arg.(*parser.ParenExpr)
+		if !ok {
+			break
+		}
+		arg = paren.Expr
+	}
+	ms, ok := arg.(*parser.MatrixSelector)
+	if !ok {
+		return e.at, e.at
+	}
+	offset := time.Duration(0)
+	if vs, ok := ms.VectorSelector.(*parser.VectorSelector); ok {
+		offset = vs.OriginalOffset
+	}
+	end := e.at.Add(-offset)
+	return end.Add(-ms.Range), end
+}
+
+func (e *evalCtx) rateLike(name string, matrix Matrix, rangeStart, rangeEnd time.Time) Vector {
 	out := make(Vector, 0, len(matrix))
 	for _, series := range matrix {
 		samples := series.Samples
 		if len(samples) < 2 {
 			continue
 		}
+		labels := cloneLabels(series.Labels)
+		delete(labels, promlabels.MetricName)
 		var value float64
 		switch name {
 		case "irate":
@@ -456,24 +482,39 @@ func (e *evalCtx) rateLike(name string, matrix Matrix) Vector {
 			}
 			value = delta / seconds
 		default:
-			increase := 0.0
+			// Counter reset correction: last-first plus each previous value
+			// when the counter resets.
+			increase := samples[len(samples)-1].V - samples[0].V
 			for i := 1; i < len(samples); i++ {
-				delta := samples[i].V - samples[i-1].V
-				if delta < 0 {
-					delta = samples[i].V
+				if samples[i].V < samples[i-1].V {
+					increase += samples[i-1].V
 				}
-				increase += delta
 			}
-			seconds := float64(samples[len(samples)-1].T-samples[0].T) / 1000
-			if seconds <= 0 {
+			sampledInterval := float64(samples[len(samples)-1].T-samples[0].T) / 1000
+			if sampledInterval <= 0 {
 				continue
 			}
-			value = increase
+			durationToStart := float64(samples[0].T-rangeStart.UnixMilli()) / 1000
+			durationToEnd := float64(rangeEnd.UnixMilli()-samples[len(samples)-1].T) / 1000
+			average := sampledInterval / float64(len(samples)-1)
+			threshold := average * 1.1
+			if durationToStart >= threshold {
+				durationToStart = average / 2
+			}
+			if durationToEnd >= threshold {
+				durationToEnd = average / 2
+			}
+			factor := (sampledInterval + durationToStart + durationToEnd) / sampledInterval
+			value = increase * factor
 			if name == "rate" {
-				value = increase / seconds
+				rangeSeconds := rangeEnd.Sub(rangeStart).Seconds()
+				if rangeSeconds <= 0 {
+					continue
+				}
+				value /= rangeSeconds
 			}
 		}
-		out = append(out, VectorSample{Labels: cloneLabels(series.Labels), T: e.at.UnixMilli(), V: value})
+		out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: value})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out
@@ -522,7 +563,9 @@ func (e *evalCtx) overTime(name string, matrix Matrix) Vector {
 		case "present_over_time":
 			value = 1
 		}
-		out = append(out, VectorSample{Labels: cloneLabels(series.Labels), T: e.at.UnixMilli(), V: value})
+		labels := cloneLabels(series.Labels)
+		delete(labels, promlabels.MetricName)
+		out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: value})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out
@@ -539,7 +582,9 @@ func (e *evalCtx) quantileOverTime(q float64, matrix Matrix) Vector {
 			values[i] = s.V
 		}
 		sort.Float64s(values)
-		out = append(out, VectorSample{Labels: cloneLabels(series.Labels), T: e.at.UnixMilli(), V: quantileSorted(q, values)})
+		labels := cloneLabels(series.Labels)
+		delete(labels, promlabels.MetricName)
+		out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: quantileSorted(q, values)})
 	}
 	return out
 }
@@ -580,7 +625,9 @@ func (e *evalCtx) evalUnaryMath(name string, call *parser.Call) (Value, error) {
 	case Vector:
 		out := make(Vector, 0, len(value))
 		for _, s := range value {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: s.T, V: fn(s.V)})
+			labels := cloneLabels(s.Labels)
+			delete(labels, promlabels.MetricName)
+			out = append(out, VectorSample{Labels: labels, T: s.T, V: fn(s.V)})
 		}
 		return out, nil
 	default:
@@ -614,7 +661,9 @@ func (e *evalCtx) evalRound(call *parser.Call) (Value, error) {
 	case Vector:
 		out := make(Vector, 0, len(value))
 		for _, s := range value {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: s.T, V: round(s.V)})
+			labels := cloneLabels(s.Labels)
+			delete(labels, promlabels.MetricName)
+			out = append(out, VectorSample{Labels: labels, T: s.T, V: round(s.V)})
 		}
 		return out, nil
 	default:
@@ -676,7 +725,9 @@ func (e *evalCtx) evalClamp(name string, call *parser.Call) (Value, error) {
 	case Vector:
 		out := make(Vector, 0, len(value))
 		for _, s := range value {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: s.T, V: clamp(s.V)})
+			labels := cloneLabels(s.Labels)
+			delete(labels, promlabels.MetricName)
+			out = append(out, VectorSample{Labels: labels, T: s.T, V: clamp(s.V)})
 		}
 		return out, nil
 	default:
@@ -827,7 +878,11 @@ func applyScalarVector(op string, scalar float64, vec Vector, scalarLeft, return
 		if err != nil || !keep {
 			continue
 		}
-		out = append(out, VectorSample{Labels: cloneLabels(sample.Labels), T: at.UnixMilli(), V: v})
+		labels := cloneLabels(sample.Labels)
+		if isArithmetic(op) || (isComparison(op) && returnBool) {
+			delete(labels, promlabels.MetricName)
+		}
+		out = append(out, VectorSample{Labels: labels, T: at.UnixMilli(), V: v})
 	}
 	return out
 }
@@ -891,6 +946,22 @@ func matchingKey(l map[string]string, matching *parser.VectorMatching) string {
 	return labelsKey(selected)
 }
 
+func isArithmetic(op string) bool {
+	switch op {
+	case "+", "-", "*", "/", "%", "^", "atan2":
+		return true
+	}
+	return false
+}
+
+func isComparison(op string) bool {
+	switch op {
+	case "==", "!=", ">", "<", ">=", "<=":
+		return true
+	}
+	return false
+}
+
 func binaryValue(op string, a, b float64, returnBool bool) (float64, bool, error) {
 	switch op {
 	case "+":
@@ -952,7 +1023,9 @@ func (e *evalCtx) evalUnary(un *parser.UnaryExpr) (Value, error) {
 	case Vector:
 		out := make(Vector, 0, len(value))
 		for _, s := range value {
-			out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: s.T, V: -s.V})
+			labels := cloneLabels(s.Labels)
+			delete(labels, promlabels.MetricName)
+			out = append(out, VectorSample{Labels: labels, T: s.T, V: -s.V})
 		}
 		return out, nil
 	default:
@@ -1088,15 +1161,20 @@ func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
 		prevCount := 0.0
 		for i, b := range buckets {
 			if b.count >= rank {
+				if math.IsInf(b.bound, 1) {
+					value = prevBound
+					break
+				}
+				denominator := b.count - prevCount
+				if denominator <= 0 {
+					value = prevBound
+					break
+				}
 				if i == 0 {
-					if b.bound <= 0 {
-						value = b.bound
-					} else {
-						value = 0 + (rank-prevCount)/(b.count-prevCount)*b.bound
-					}
+					value = (rank - prevCount) / denominator * b.bound
 				} else {
 					span := b.bound - prevBound
-					value = prevBound + (rank-prevCount)/(b.count-prevCount)*span
+					value = prevBound + (rank-prevCount)/denominator*span
 				}
 				break
 			}

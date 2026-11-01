@@ -18,7 +18,12 @@ an explicit error.
 | `GET /api/status/buildinfo` | Implemented |
 
 Trace-by-ID returns OTLP JSON by default and OTLP protobuf when requested via
-the `Accept` header. Trace and span IDs are hexadecimal.
+the `Accept` header. Trace and span IDs are hexadecimal. The v2 protobuf response
+uses the Tempo `TraceByIDResponse` envelope (field 1 contains the OTLP trace);
+the v1 protobuf response is the OTLP trace itself. The envelope is encoded
+manually so the gateway does not import Tempo's AGPL-licensed proto module.
+Grafana's Tempo datasource requests v2 protobuf first and falls back to v1 on
+404.
 
 ## TraceQL subset
 
@@ -36,11 +41,14 @@ Supported key forms:
 - `span.<attribute>` — span attributes.
 - Unscoped attributes are looked up in span attributes first, then resource
   attributes.
-- Intrinsics: `service.name`, `name`/`span.name`, `status`/`span.status`,
-  `kind`/`span.kind`, `duration`/`span.duration`.
+- Intrinsics: `service.name`, `name`/`span.name`/`span:name`,
+  `status`/`span.status`/`span:status`, `kind`/`span.kind`/`span:kind`,
+  `duration`/`span.duration`/`span:duration`.
 
 Durations accept Go duration strings such as `1s`, `250ms`, or `1m`. Status and
-kind comparisons are case-insensitive.
+kind comparisons are case-insensitive. Regex matchers are fully anchored, as in
+Tempo. A condition on a missing attribute does not match, including `!=` and
+`!~`.
 
 ## Tag-based search
 

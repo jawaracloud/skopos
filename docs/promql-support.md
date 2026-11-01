@@ -1,7 +1,8 @@
 # PromQL support (alpha)
 
-Status: **alpha**. No compatibility guarantee. Anything not listed here returns
-an explicit error; it is never silently approximated.
+Status: **alpha**. No compatibility guarantee. Unlisted functions, operators,
+and extensions return an explicit error. Unsupported metric types are called out
+below because they can return an empty vector rather than an error.
 
 PromQL is parsed with the official Prometheus parser
 (`github.com/prometheus/prometheus/promql/parser`, v0.315.1, Apache-2.0). The
@@ -26,6 +27,7 @@ evaluator runs in the gateway over samples fetched from ClickHouse.
 - Label matchers `=`, `!=`, `=~`, `!~`.
 - `offset`.
 - Lookback: 5 minutes for instant selectors.
+- Label regex matchers are fully anchored, matching Prometheus.
 - Metric names and label names are normalized: characters outside
   `[A-Za-z0-9_]` become `_`. For example `http.server.request.duration` becomes
   `http_server_request_duration` and `http.method` becomes `http_method`.
@@ -47,8 +49,12 @@ evaluator runs in the gateway over samples fetched from ClickHouse.
 | Helpers | `time`, `timestamp`, `scalar`, `vector` |
 
 Counter resets are handled explicitly: a negative delta is treated as a reset.
-There are no staleness markers in ClickHouse, so staleness is approximated by
-the 5-minute lookback.
+`rate`/`increase` extrapolate to the range boundaries using Prometheus's
+average-sample-interval rule. `timestamp()` returns the original sample time,
+not the evaluation time. Metric names are dropped for functions and arithmetic
+operations; comparisons without `bool` retain them, as in Prometheus. There are
+no staleness markers in ClickHouse, so staleness is approximated by the
+5-minute lookback.
 
 ## Aggregations and binary operators
 
@@ -64,6 +70,11 @@ the 5-minute lookback.
 
 - Sample resolution is ClickHouse `DateTime` seconds for metric tables.
 - Native histograms and exemplars are not supported.
+- Only the gauge, sum, and classic histogram tables are read. OTel summary and
+  exponential-histogram metrics are stored but not yet queryable through this
+  head; a selector for one of those metric types returns an empty result rather
+  than an error.
+- Metric unit suffixes are not appended (see the label section above).
 - `label_replace`, `label_join`, `absent`, `absent_over_time`, `topk`,
   `bottomk`, `count_values`, and other unlisted functions are rejected.
 - A query scans gauge, sum, and histogram tables for each selector. The gateway

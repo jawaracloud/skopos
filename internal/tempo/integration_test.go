@@ -3,6 +3,7 @@
 package tempo
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -20,6 +21,13 @@ import (
 	"github.com/mrofisr/skopos/internal/chclient"
 	"github.com/mrofisr/skopos/internal/plan"
 )
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
 
 func TestIntegrationTempoAPI(t *testing.T) {
 	baseURL := os.Getenv("CLICKHOUSE_URL")
@@ -141,6 +149,29 @@ func TestIntegrationTempoAPI(t *testing.T) {
 	}
 	if len(trace.ResourceSpans) == 0 || len(trace.ResourceSpans[0].ScopeSpans[0].Spans) != 2 {
 		t.Fatalf("protobuf trace = %#v", &trace)
+	}
+
+	req, _ = http.NewRequest(http.MethodGet, server.URL+"/api/v2/traces/"+traceID, nil)
+	req.Header.Set("Accept", "application/protobuf")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("v2 protobuf request: %v", err)
+	}
+	envelope, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if len(envelope) < 2 || envelope[0] != 0x0a {
+		t.Fatalf("v2 envelope = %x", envelope[:minInt(8, len(envelope))])
+	}
+	length, n := binary.Uvarint(envelope[1:])
+	if n <= 0 || int(length) > len(envelope)-1-n {
+		t.Fatalf("v2 envelope length invalid")
+	}
+	var v2 tracev1.TracesData
+	if err := proto.Unmarshal(envelope[1+n:1+n+int(length)], &v2); err != nil {
+		t.Fatalf("unmarshal v2 trace: %v", err)
+	}
+	if len(v2.ResourceSpans) == 0 {
+		t.Fatalf("v2 trace = %#v", &v2)
 	}
 
 	resp = get("/api/search/tag/service.name/values?start=1793488800&end=1793491200")

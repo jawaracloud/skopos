@@ -45,6 +45,10 @@ func TestTraceQLStatusDurationAndRegex(t *testing.T) {
 		{`{ span.http.status_code =~ "5.." }`, true},
 		{`{ span.http.status_code !~ "4.." }`, true},
 		{`{ service.name = "checkout" }`, true},
+		{`{ span:name = "GET /checkout" }`, true},
+		{`{ span:duration > 1s }`, true},
+		{`{ resource.environment = ~"prod" }`, false},
+		{`{ span.missing != "x" }`, false},
 	}
 	for _, tc := range tests {
 		filter, err := ParseTraceQL(tc.query)
@@ -52,7 +56,7 @@ func TestTraceQLStatusDurationAndRegex(t *testing.T) {
 			t.Fatalf("%s: %v", tc.query, err)
 		}
 		if got := filter.Match(testSpan()); got != tc.match {
-			t.Errorf("%s match = %v, want %v", tc.query, got, tc.match)
+			t.Errorf("%s match = %v, want %v (%#v)", tc.query, got, tc.match, filter)
 		}
 	}
 }
@@ -67,6 +71,16 @@ func TestParseTags(t *testing.T) {
 	}
 	if filter.Match(Span{ServiceName: "cart"}) {
 		t.Fatal("tags filter matched wrong service")
+	}
+}
+
+func TestTraceQLRegexIsAnchored(t *testing.T) {
+	filter, err := ParseTraceQL(`{ resource.service.name =~ "check" }`)
+	if err != nil {
+		t.Fatalf("ParseTraceQL: %v", err)
+	}
+	if filter.Match(testSpan()) {
+		t.Fatal("unanchored regex matched checkout")
 	}
 }
 

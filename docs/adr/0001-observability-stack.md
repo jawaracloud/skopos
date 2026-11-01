@@ -114,7 +114,7 @@ the gateway.
 | --- | --- | --- |
 | ClickHouse exporter exists in the pinned contrib distribution | Verified: exporter is in contrib v0.164.0; image pinned by digest. | Re-check on every version bump. |
 | Collector remote-write receiver for mirroring | Not verified | Check component and maturity before enabling. |
-| Tempo wire format requested by Grafana (JSON vs protobuf) | Verified: Tempo returns OTLP JSON by default and protobuf with `Accept: application/protobuf`; both are implemented using the official OTLP messages. | Replay against a real Grafana during the alpha release checklist. |
+| Tempo wire format requested by Grafana (JSON vs protobuf) | Verified from the Grafana Tempo datasource source: it requests `/api/v2/traces` with `Accept: application/protobuf` and falls back to `/api/traces` on 404. The v2 `TraceByIDResponse` envelope is encoded manually without importing Tempo's AGPL protos. | Replay against a real Grafana during the alpha release checklist. |
 | OBI in CI | OBI needs kernel 5.8+, BTF, and privileges; standard CI runners may not qualify. | Use an OTLP generator in CI and test OBI on a dedicated VM. |
 | Official PromQL parser dependency tree | Measured: 15 modules in the build, all Apache-2.0/BSD-3/MIT; vendored. | Re-check on every version bump. |
 | Real ClickHouse compression and cost | Not measured | M6. |

@@ -50,7 +50,7 @@ func (c condition) Match(span Span) bool {
 	}
 	actual, ok := SpanTag(span, c.key)
 	if !ok {
-		return c.op == "!=" || c.op == "!~"
+		return false
 	}
 	if c.key == "status" || c.key == "span.status" || c.key == "kind" || c.key == "span.kind" {
 		actual = strings.ToLower(actual)
@@ -189,7 +189,7 @@ func parseCondition(raw string) (condition, error) {
 		if unquoted, err := unquote(value); err == nil {
 			pattern = unquoted
 		}
-		re, err := regexp.Compile(pattern)
+		re, err := regexp.Compile("^(?:" + pattern + ")$")
 		if err != nil {
 			return condition{}, fmt.Errorf("tempo: invalid regex %q: %w", pattern, err)
 		}

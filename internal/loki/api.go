@@ -67,7 +67,7 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	start, end, err := a.timeRange(r)
+	start, end, err := a.queryTimeRange(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -135,7 +135,7 @@ func (a *API) handleLabels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	selectors, err := parseSelectors(r.Form["match[]"])
+	selectors, err := selectorsFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -180,7 +180,7 @@ func (a *API) handleLabelValues(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	selectors, err := parseSelectors(r.Form["match[]"])
+	selectors, err := selectorsFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -220,13 +220,13 @@ func (a *API) handleSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	selectors, err := parseSelectors(r.Form["match[]"])
+	selectors, err := selectorsFromRequest(r)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if len(selectors) == 0 {
-		writeError(w, http.StatusBadRequest, "match[] is required")
+		writeError(w, http.StatusBadRequest, "match[] or query is required")
 		return
 	}
 	entries, err := a.Fetcher.FetchRange(r.Context(), start, end)
@@ -313,6 +313,32 @@ func parseLokiTime(value string, fallback time.Time) (time.Time, error) {
 	default:
 		return time.Unix(0, n).UTC(), nil
 	}
+}
+
+func (a *API) queryTimeRange(r *http.Request) (time.Time, time.Time, error) {
+	if strings.HasSuffix(r.URL.Path, "/query") && r.FormValue("time") != "" {
+		at, err := parseLokiTime(r.FormValue("time"), a.now())
+		if err != nil {
+			return time.Time{}, time.Time{}, fmt.Errorf("time: %w", err)
+		}
+		return at.Add(-5 * time.Minute), at, nil
+	}
+	return a.timeRange(r)
+}
+
+func selectorsFromRequest(r *http.Request) ([]Query, error) {
+	selectors, err := parseSelectors(r.Form["match[]"])
+	if err != nil {
+		return nil, err
+	}
+	if len(selectors) == 0 && r.FormValue("query") != "" {
+		query, err := Parse(r.FormValue("query"))
+		if err != nil {
+			return nil, err
+		}
+		selectors = []Query{query}
+	}
+	return selectors, nil
 }
 
 func parseSelectors(values []string) ([]Query, error) {

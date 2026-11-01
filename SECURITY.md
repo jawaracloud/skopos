@@ -47,5 +47,6 @@ compatibility guarantee and may receive security fixes only on the latest tag.
 - The OBI DaemonSet needs `hostPID` and host mounts. Treat it as a privileged
   node-level agent, even when running with capabilities instead of
   `privileged: true`.
-- The alpha query APIs are not implemented yet. Do not put production data
-  behind a gateway that cannot enforce the final query limits.
+- The alpha query APIs are implemented with narrow, published support lists.
+  Do not put production data behind a gateway whose query semantics have not
+  passed the beta compliance gates.

@@ -8,6 +8,7 @@ package prom
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -28,12 +29,18 @@ type Series struct {
 	Samples []Sample
 }
 
-// VectorSample is one instant-vector element.
+// VectorSample is one instant-vector element. T is the evaluation timestamp;
+// SampleT is the original sample timestamp (used by timestamp()).
 type VectorSample struct {
-	Labels map[string]string
-	T      int64
-	V      float64
+	Labels  map[string]string
+	T       int64
+	V       float64
+	SampleT int64
 }
+
+// ErrBadQuery marks parse and unsupported-expression errors that are the
+// caller's fault and should map to HTTP 400.
+var ErrBadQuery = errors.New("prom: bad query")
 
 // Vector is an instant vector.
 type Vector []VectorSample

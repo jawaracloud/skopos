@@ -89,7 +89,7 @@ func parseMatcher(raw string) (Matcher, error) {
 	}
 	m := Matcher{Name: NormalizeLabelName(name), Op: op, Value: unquoted}
 	if op == "=~" || op == "!~" {
-		re, err := regexp.Compile(unquoted)
+		re, err := regexp.Compile("^(?:" + unquoted + ")$")
 		if err != nil {
 			return Matcher{}, fmt.Errorf("loki: invalid regex %q: %w", unquoted, err)
 		}

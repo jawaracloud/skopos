@@ -22,7 +22,8 @@ Stream selector:
 {service_name="checkout", severity_text=~"ERR.*"}
 ```
 
-Supported matchers: `=`, `!=`, `=~`, `!~`.
+Supported matchers: `=`, `!=`, `=~`, `!~`. Label regex matchers are fully
+anchored, as in Loki.
 
 Line filters:
 
@@ -35,6 +36,8 @@ Line filters:
 
 `query` and `query_range` support `start`, `end`, `limit`, and `direction`
 (`forward` or `backward`, default backward). For log queries `step` is ignored.
+The instant `/query` endpoint accepts `time` and evaluates a 5-minute window
+ending at that time; without `time` it uses the last hour.
 `start`/`end` accept RFC3339, Unix seconds, milliseconds, microseconds, or
 nanoseconds; Grafana's nanosecond values are supported.
 
@@ -53,7 +56,9 @@ The following stream labels are exposed when present:
   `k8s_pod_name`.
 
 `/loki/api/v1/series` returns one label set per distinct stream. It can return
-multiple sets when severity, trace ID, or other labels differ.
+multiple sets when severity, trace ID, or other labels differ. Labels, label
+values, and series accept either `match[]` selectors or a `query` stream
+selector.
 
 ## Known limitations
 

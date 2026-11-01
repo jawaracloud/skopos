@@ -60,6 +60,16 @@ func TestNormalizesAttributeLabels(t *testing.T) {
 	}
 }
 
+func TestMatcherRegexIsAnchored(t *testing.T) {
+	query, err := Parse(`{service_name=~"check"}`)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	if query.Match(entry()) {
+		t.Fatal("unanchored regex matched checkout")
+	}
+}
+
 func TestRejectsUnsupportedLogQL(t *testing.T) {
 	for _, query := range []string{
 		`{service_name="checkout"} | json`,

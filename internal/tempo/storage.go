@@ -357,6 +357,9 @@ func stringAt(values []string, i int) string {
 // Helper for tag value extraction from a span.
 func SpanTag(span Span, tag string) (string, bool) {
 	tag = strings.TrimPrefix(tag, ".")
+	if scope, key := tagScope(tag); scope != "" {
+		tag = scope + "." + key
+	}
 	switch tag {
 	case "service.name", "resource.service.name":
 		if span.ServiceName != "" {
@@ -398,6 +401,12 @@ func tagScope(tag string) (string, string) {
 		return "span", strings.TrimPrefix(tag, "span.")
 	case strings.HasPrefix(tag, "intrinsic."):
 		return "intrinsic", strings.TrimPrefix(tag, "intrinsic.")
+	case strings.HasPrefix(tag, "resource:"):
+		return "resource", strings.TrimPrefix(tag, "resource:")
+	case strings.HasPrefix(tag, "span:"):
+		return "span", strings.TrimPrefix(tag, "span:")
+	case strings.HasPrefix(tag, "trace:"):
+		return "intrinsic", strings.TrimPrefix(tag, "trace:")
 	default:
 		return "", tag
 	}

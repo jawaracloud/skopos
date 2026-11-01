@@ -3,6 +3,7 @@ package prom
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"net/http"
@@ -81,7 +82,7 @@ func (a *API) handleQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	value, err := a.Engine.Query(r.Context(), query, at)
 	if err != nil {
-		writeExecutionError(w, err)
+		writeEngineError(w, err)
 		return
 	}
 	data := map[string]any{"resultType": value.Type()}
@@ -132,7 +133,7 @@ func (a *API) handleQueryRange(w http.ResponseWriter, r *http.Request) {
 	}
 	matrix, err := a.Engine.QueryRange(r.Context(), query, start, end, step)
 	if err != nil {
-		writeExecutionError(w, err)
+		writeEngineError(w, err)
 		return
 	}
 	result := make([]any, 0, len(matrix))
@@ -366,7 +367,12 @@ func parseStep(value string) (time.Duration, error) {
 	return time.Duration(seconds * float64(time.Second)), nil
 }
 
+const maxSelectors = 20
+
 func parseSelectors(values []string) ([]Selector, error) {
+	if len(values) > maxSelectors {
+		return nil, fmt.Errorf("too many match[] selectors: maximum is %d", maxSelectors)
+	}
 	out := make([]Selector, 0, len(values))
 	for _, value := range values {
 		matchers, err := parser.NewParser(parser.Options{}).ParseMetricSelector(value)
@@ -416,6 +422,14 @@ func writeError(w http.ResponseWriter, status int, errorType, message string) {
 		"errorType": errorType,
 		"error":     message,
 	})
+}
+
+func writeEngineError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrBadQuery) || strings.Contains(err.Error(), "unsupported") {
+		writeError(w, http.StatusBadRequest, "bad_data", err.Error())
+		return
+	}
+	writeExecutionError(w, err)
 }
 
 func writeExecutionError(w http.ResponseWriter, err error) {

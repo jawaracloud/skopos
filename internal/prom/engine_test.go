@@ -203,6 +203,109 @@ func TestHistogramQuantile(t *testing.T) {
 	}
 }
 
+func TestRateExtrapolatesToRangeBoundaries(t *testing.T) {
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	series := Series{
+		Labels: map[string]string{"__name__": "sparse_total", "service_name": "sparse"},
+		Samples: []Sample{
+			{T: base.Add(time.Minute).UnixMilli(), V: 1},
+			{T: base.Add(2 * time.Minute).UnixMilli(), V: 2},
+		},
+	}
+	engine := NewEngine(fakeFetcher{series: []Series{series}})
+	v, err := engine.Query(context.Background(), `rate(sparse_total[5m])`, atFive())
+	if err != nil {
+		t.Fatalf("rate: %v", err)
+	}
+	vec := v.(Vector)
+	if len(vec) != 1 {
+		t.Fatalf("vector = %#v", vec)
+	}
+	want := 1 * 2.5 / 300
+	if math.Abs(vec[0].V-want) > 1e-9 {
+		t.Fatalf("rate = %v, want %v", vec[0].V, want)
+	}
+}
+
+func TestTimestampUsesSampleTime(t *testing.T) {
+	atSix := time.Date(2026, 11, 1, 0, 6, 0, 0, time.UTC)
+	v, err := testEngine().Query(context.Background(), `timestamp(http_requests_total{service_name="checkout"})`, atSix)
+	if err != nil {
+		t.Fatalf("timestamp: %v", err)
+	}
+	vec := v.(Vector)
+	if len(vec) != 1 {
+		t.Fatalf("vector = %#v", vec)
+	}
+	want := float64(time.Date(2026, 11, 1, 0, 5, 0, 0, time.UTC).Unix())
+	if vec[0].V != want {
+		t.Fatalf("timestamp = %v, want %v", vec[0].V, want)
+	}
+}
+
+func TestMetricNameDropping(t *testing.T) {
+	tests := []struct {
+		query   string
+		wantHas bool
+	}{
+		{`rate(http_requests_total{service_name="checkout"}[2m])`, false},
+		{`http_requests_total{service_name="checkout"} * 2`, false},
+		{`http_requests_total{service_name="checkout"} > 0`, true},
+		{`http_requests_total{service_name="checkout"} > bool 0`, false},
+	}
+	for _, tc := range tests {
+		v, err := testEngine().Query(context.Background(), tc.query, atFive())
+		if err != nil {
+			t.Fatalf("%s: %v", tc.query, err)
+		}
+		vec := v.(Vector)
+		if len(vec) == 0 {
+			t.Fatalf("%s: empty vector", tc.query)
+		}
+		_, has := vec[0].Labels["__name__"]
+		if has != tc.wantHas {
+			t.Fatalf("%s __name__ present = %v, want %v (%#v)", tc.query, has, tc.wantHas, vec[0].Labels)
+		}
+	}
+}
+
+func TestHistogramQuantileInfBucket(t *testing.T) {
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	bucket := func(le string, count float64) Series {
+		return Series{
+			Labels: map[string]string{"__name__": "x_bucket", "service_name": "checkout", "le": le},
+			Samples: []Sample{
+				{T: base.UnixMilli(), V: count},
+				{T: base.Add(5 * time.Minute).UnixMilli(), V: count},
+			},
+		}
+	}
+	engine := NewEngine(fakeFetcher{series: []Series{
+		bucket("0.1", 1),
+		bucket("0.5", 2),
+		bucket("1", 2),
+		bucket("+Inf", 10),
+	}})
+	v, err := engine.Query(context.Background(), `histogram_quantile(0.99, x_bucket)`, atFive())
+	if err != nil {
+		t.Fatalf("histogram_quantile: %v", err)
+	}
+	vec := v.(Vector)
+	if len(vec) != 1 || vec[0].V != 1 {
+		t.Fatalf("inf bucket = %#v, want 1", vec)
+	}
+}
+
+func TestLabelRegexIsAnchored(t *testing.T) {
+	v, err := testEngine().Query(context.Background(), `http_requests_total{service_name=~"check"}`, atFive())
+	if err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(v.(Vector)) != 0 {
+		t.Fatalf("unanchored regex matched: %#v", v)
+	}
+}
+
 func TestUnsupportedFunction(t *testing.T) {
 	if _, err := testEngine().Query(context.Background(), `label_replace(http_requests_total, "a", "$1", "b", "(.*)")`, atFive()); err == nil {
 		t.Fatal("expected unsupported function error")

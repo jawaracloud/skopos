@@ -108,6 +108,18 @@ func TestSeriesPOST(t *testing.T) {
 	}
 }
 
+func TestQueryParameterFiltersLabelsAndInstantTime(t *testing.T) {
+	h, _ := testAPI(t)
+	rec := do(t, h, `/loki/api/v1/labels?query=`+url.QueryEscape(`{severity_text="ERROR"}`))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("filtered labels = %d %s", rec.Code, rec.Body)
+	}
+	rec = do(t, h, `/loki/api/v1/query?query=`+url.QueryEscape(`{service_name="checkout"}`)+`&time=2026-11-01T00:00:00Z`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("instant query = %d %s", rec.Code, rec.Body)
+	}
+}
+
 func TestBadQueryAndBuildInfo(t *testing.T) {
 	h, _ := testAPI(t)
 	rec := do(t, h, `/loki/api/v1/query?query=`+url.QueryEscape(`{service_name="checkout"} | json`))
