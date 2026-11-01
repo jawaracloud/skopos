@@ -1,0 +1,44 @@
+{
+  "schema": "ctx/v1",
+  "version": "2026-11-01.1",
+  "metrics": {
+    "http_server_request_duration_seconds": {
+      "description": "HTTP server request duration",
+      "type": "histogram",
+      "unit": "s",
+      "role": "latency",
+      "direction": "higher_is_worse",
+      "owner": "checkout",
+      "service": "checkout",
+      "query": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[5m])))",
+      "runbook": "https://runbooks.example.com/checkout/latency",
+      "labels": {
+        "service_name": "Emitting service",
+        "http_route": "Normalized HTTP route",
+        "le": "Histogram bucket upper bound"
+      },
+      "caveats": [
+        "Use rate() on _bucket, not the raw counter."
+      ],
+      "flags": [
+        "slo_metric"
+      ]
+    }
+  },
+  "services": {
+    "checkout": {
+      "description": "Checkout API",
+      "owner": "payments",
+      "runbook": "https://runbooks.example.com/checkout",
+      "metrics": [
+        "http_server_request_duration_seconds"
+      ],
+      "logs": [
+        "checkout error logs"
+      ],
+      "traces": [
+        "GET /checkout"
+      ]
+    }
+  }
+}

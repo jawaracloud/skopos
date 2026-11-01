@@ -172,6 +172,9 @@ The important values are:
 | `clickhouse.backup.enabled` | `false` | Optional CronJob that runs `BACKUP DATABASE` to a separate S3 destination. See [storage.md](storage.md). |
 | `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
 | `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
+| `context.enabled` | `false` | Mount a semantic context catalog and serve `/api/v1/context/*`. |
+| `context.existingConfigMap` | `""` | Existing ConfigMap with a `catalog.json` key. |
+| `context.catalog` | `""` | Inline catalog JSON rendered into a ConfigMap. |
 | `auth.enabled` | `false` | Enable HTTP Basic auth on query and version routes. `/healthz` and `/readyz` stay open. |
 | `auth.existingSecret` | `""` | Secret with `username` and `password` keys. Preferred over inline values. |
 | `auth.username`, `auth.password` | `""` | Inline credentials rendered into a Secret. Use only when `existingSecret` is empty. |

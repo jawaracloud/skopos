@@ -10,6 +10,26 @@
     "fullnameOverride": {
       "type": "string"
     },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "existingConfigMap",
+        "catalog"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "existingConfigMap": {
+          "type": "string"
+        },
+        "catalog": {
+          "type": "string"
+        }
+      }
+    },
     "auth": {
       "type": "object",
       "additionalProperties": false,

@@ -92,6 +92,14 @@ app.kubernetes.io/component: {{ $component }}
 {{- end }}
 {{- end }}
 
+{{- define "skopos.context.configMapName" -}}
+{{- if .Values.context.existingConfigMap }}
+{{- .Values.context.existingConfigMap }}
+{{- else }}
+{{- printf "%s-context" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
 {{- define "skopos.clickhouse.host" -}}
 {{- include "skopos.clickhouse.fullname" . }}
 {{- end }}

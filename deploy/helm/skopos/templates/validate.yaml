@@ -12,6 +12,14 @@
 {{- fail "auth.enabled=true requires auth.existingSecret or both auth.username and auth.password" }}
 {{- end }}
 {{- end }}
+{{- if .Values.context.enabled }}
+{{- if and .Values.context.existingConfigMap .Values.context.catalog }}
+{{- fail "set either context.existingConfigMap or inline context.catalog, not both" }}
+{{- end }}
+{{- if and (not .Values.context.existingConfigMap) (not .Values.context.catalog) }}
+{{- fail "context.enabled=true requires context.existingConfigMap or context.catalog" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.obi.enabled (not .Values.obi.serviceAccount.create) (not .Values.obi.serviceAccount.name) }}
 {{- fail "obi.enabled=true requires obi.serviceAccount.create=true or obi.serviceAccount.name" }}
 {{- end }}

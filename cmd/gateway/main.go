@@ -20,6 +20,7 @@ import (
 	"github.com/jawaracloud/skopos/internal/loki"
 	"github.com/jawaracloud/skopos/internal/plan"
 	"github.com/jawaracloud/skopos/internal/prom"
+	"github.com/jawaracloud/skopos/internal/semctx"
 	"github.com/jawaracloud/skopos/internal/tempo"
 )
 
@@ -88,6 +89,12 @@ func runFrontend(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) 
 }
 
 func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) error {
+	contextCatalog, err := semctx.LoadFile(cfg.ContextFile)
+	if err != nil {
+		return fmt.Errorf("semantic context: %w", err)
+	}
+	contextAPI := semctx.NewAPI(contextCatalog)
+
 	client, err := chclient.New(chclient.Config{
 		BaseURL:          cfg.ClickHouseURL,
 		Database:         cfg.ClickHouseDatabase,
@@ -133,6 +140,7 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 		promAPI.Register(mux)
 		tempoAPI.Register(mux)
 		lokiAPI.Register(mux)
+		contextAPI.Register(mux)
 	}
 
 	api, err := httpapi.New(httpapi.Config{
@@ -160,6 +168,8 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 		"traceql", true,
 		"logql", true,
 		"auth_enabled", cfg.AuthEnabled,
+		"context_metrics", len(contextCatalog.Metrics),
+		"context_services", len(contextCatalog.Services),
 	}
 	switch cfg.Mode {
 	case config.ModeWorker:
