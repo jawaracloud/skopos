@@ -1,42 +1,38 @@
 name: ci
 
-# Go-only trigger: docs, Helm values/schema, systemd units, and other
-# non-Go changes do not start this workflow. A PR that includes any Go change
-# still runs the full matrix.
+# Every pull request runs the full matrix. Do not add path filters: required
+# checks must report on every change, including Helm, Dockerfile, workflow, and
+# documentation-only changes.
+
 on:
   push:
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - "vendor/**"
-      - ".github/workflows/ci.yml"
   pull_request:
-    paths:
-      - "**/*.go"
-      - "go.mod"
-      - "go.sum"
-      - "vendor/**"
-      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
 
 env:
-  GO_VERSION: "1.27.x"
-  GOVULNCHECK_VERSION: v1.9.0
   HELM_VERSION: v3.22.1
+  GOVULNCHECK_VERSION: v1.9.0
+  ACTIONLINT_VERSION: v1.7.12
+  ZIZMOR_VERSION: v1.32.0
+  ZIZMOR_SHA256: bb110cc765eca9cd7efb2e284a956be5974c60027b0970f16397d86208a9957b
 
 jobs:
   go:
     name: Go build, vet, test
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
       - name: Verify module checksums
         run: go mod verify
       - name: Verify vendor tree is current
@@ -60,13 +56,14 @@ jobs:
           go vet ./...
           go test -count=1 ./...
       - name: Install govulncheck
-        run: "go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}"
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
       - name: govulncheck
         run: '$(go env GOPATH)/bin/govulncheck ./...'
 
   integration:
     name: ClickHouse integration
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     services:
       clickhouse:
         image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
@@ -81,11 +78,15 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
       - name: Integration tests
         env:
           CLICKHOUSE_URL: http://127.0.0.1:8123
@@ -96,7 +97,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
       - name: Tempo differential
         run: test/compat/tempo/run.sh
       - name: Loki differential
@@ -107,11 +116,15 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
       - name: Prometheus + cerberus + Skopos
         run: test/compat/cerberus/run.sh
 
@@ -120,8 +133,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: ${{ env.HELM_VERSION }}
       - name: Run ClickHouse + RustFS integration
@@ -130,9 +147,14 @@ jobs:
   helm:
     name: Helm lint and render
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: ${{ env.HELM_VERSION }}
       - name: Lint
@@ -147,6 +169,7 @@ jobs:
       - name: Render distributed frontend and query
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.enabled=true \
             --set distributed.enabled=true \
             --set frontend.replicaCount=2 \
             --set query.replicaCount=2 > /tmp/skopos-distributed.yaml
@@ -156,17 +179,20 @@ jobs:
       - name: Render overrides
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.enabled=true \
             --set clickhouse.database=otel_test \
             --set clickhouse.persistence.storageClass=standard \
             --set gateway.replicaCount=2 > /tmp/skopos-overrides.yaml
       - name: Render with digest-pinned gateway image
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.enabled=true \
             --set gateway.image.digest=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
             > /tmp/skopos-digest.yaml
       - name: Render basic auth
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.enabled=true \
             --set auth.enabled=true \
             --set auth.username=viewer \
             --set auth.password=secret > /tmp/skopos-auth.yaml
@@ -176,6 +202,7 @@ jobs:
       - name: Render AI context catalog
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \
+            --set gateway.enabled=true \
             --set context.enabled=true \
             --set-file context.catalog=deploy/examples/context/catalog.json \
             > /tmp/skopos-context.yaml
@@ -200,3 +227,41 @@ jobs:
           grep -q 'kind: CronJob' /tmp/skopos-storage.yaml
           test "$(grep -c 'TO VOLUME' /tmp/skopos-storage.yaml)" -eq 8
           grep -q 'storage_policy = .tiered.' /tmp/skopos-storage.yaml
+
+  policy:
+    name: Workflow policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@${{ env.ACTIONLINT_VERSION }}
+      - name: Install zizmor
+        run: |
+          set -eu
+          curl -fsSLo /tmp/zizmor.tar.gz \
+            "https://github.com/zizmorcore/zizmor/releases/download/${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${ZIZMOR_SHA256}  /tmp/zizmor.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/zizmor.tar.gz -C /tmp
+          install -m 0755 /tmp/zizmor "$(go env GOPATH)/bin/zizmor"
+      - name: actionlint
+        run: '$(go env GOPATH)/bin/actionlint'
+      - name: zizmor
+        run: '$(go env GOPATH)/bin/zizmor --offline --min-severity=low .github/workflows'
+      - name: Reject blocked workflow patterns
+        run: |
+          set -eu
+          ! grep -RIn --include='*.yml' --include='*.yaml' 'pull_request_target' .github/workflows
+          ! grep -RIn --include='*.yml' --include='*.yaml' 'ubuntu-latest' .github/workflows
+      - name: Install go-licenses
+        run: go install github.com/google/go-licenses@v1.6.0
+      - name: License policy
+        run: '$(go env GOPATH)/bin/go-licenses check ./... --allowed_licenses=Apache-2.0,BSD-3-Clause,MIT,ISC'

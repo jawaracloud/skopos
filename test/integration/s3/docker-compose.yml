@@ -2,7 +2,7 @@ name: skopos-s3-it
 
 services:
   rustfs-perms:
-    image: alpine:3.22
+    image: alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
     user: "0:0"
     command:
       - /bin/sh
@@ -41,7 +41,7 @@ services:
       start_period: 5s
 
   buckets:
-    image: amazon/aws-cli:2.31.7
+    image: amazon/aws-cli:2.31.7@sha256:8173c3c7c71e25b0824025b90a85df6e24c696f646498dca9dd370ea446e4fc8
     depends_on:
       rustfs:
         condition: service_healthy
@@ -61,7 +61,7 @@ services:
         aws --endpoint-url http://rustfs:9000 s3 mb s3://skopos-backup || true
 
   clickhouse-perms:
-    image: alpine:3.22
+    image: alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
     user: "0:0"
     command:
       - /bin/sh
@@ -71,7 +71,7 @@ services:
       - clickhouse-data:/var/lib/clickhouse
 
   clickhouse:
-    image: clickhouse/clickhouse-server:26.8.36.3
+    image: clickhouse/clickhouse-server:26.8.36.3@sha256:d426d2f612e1e189c90f9a3f8dcd85a03c6851273833817a296bb327e63aa7a7
     user: "101:101"
     depends_on:
       buckets:

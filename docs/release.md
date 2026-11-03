@@ -1,104 +1,101 @@
 # Release process
 
-The release path is intentionally separate from normal CI. Pull requests run
-lint, tests, the ClickHouse integration test, and Helm rendering; they do not
-need registry credentials or signing keys.
+Skopos uses one annotated `vX.Y.Z` tag to release both the gateway image and
+the Helm chart. There is no manual publish path. Re-running a failed release
+means creating a new patch tag; published releases are immutable.
 
 ## What a release produces
 
-[`scripts/release.sh`](../scripts/release.sh) writes to `dist/release/`:
-
-- `skopos-<version>.tgz`: the packaged Helm chart, with the image version in
-  `appVersion`.
-- The gateway image `ghcr.io/<owner>/skopos-gateway:<version>`.
-- `skopos-gateway-<version>.spdx.json` when `syft` is installed, otherwise
-  `skopos-gateway-<version>.cdx.json` from the documented fallback.
-- `skopos-chart-<version>.spdx.json` when `syft` is installed.
+- `ghcr.io/<owner>/skopos-gateway:<version>` with an immutable digest.
+- `oci://ghcr.io/<owner>/charts/skopos:<version>` with an immutable digest.
+- `skopos-<version>.tgz`: the packaged Helm chart.
+- `skopos-gateway-<version>.spdx.json` and
+  `skopos-chart-<version>.spdx.json`: SBOMs.
+- `values.release.yaml`: the chart values that pin the released image digest.
 - `release-metadata.txt` and `SHA256SUMS`.
-- Optional `.sig` files when `SIGN=1`.
+- Cosign Sigstore bundles for the image and chart.
+- GitHub artifact attestations for provenance and SBOMs.
 
-The fallback SBOM is a CycloneDX 1.5 inventory built from the vendored Go module
-graph and the SHA256 of every chart source file. It is deliberately conservative
-and exists so a release is never blocked on a missing scanner. Install
-[syft](https://github.com/anchore/syft) for a full image SBOM.
+## Before tagging
 
-## Local dry run
+1. Update `deploy/helm/skopos/Chart.yaml`:
+   - `version` must equal the tag without `v`.
+   - `appVersion` must equal the tag without `v`.
+2. Update the default image tag if needed. Release installs use
+   `values.release.yaml`, not the chart default.
+3. Merge the version bump through a pull request with all required checks.
+4. Confirm that the commit is on `main` and CI is green.
 
-```sh
-make release VERSION=0.1.0-alpha.1          # builds image + chart + SBOM locally
-make release-dry-run VERSION=0.1.0-alpha.1  # same, explicitly no push/sign
-```
-
-`release.sh` uses `docker build` and `helm package`. It does not push unless
-`PUSH=1`, and it does not sign unless `SIGN=1`.
-
-## GitHub release
-
-Create and push a tag:
+## Create the release
 
 ```sh
-git tag v0.1.0-alpha.1
-git push origin v0.1.0-alpha.1
+git switch main
+git pull --ff-only
+git tag -a v0.1.0-alpha.2 -m "Skopos v0.1.0-alpha.2"
+git push origin v0.1.0-alpha.2
 ```
 
 `.github/workflows/release.yml` then:
 
-1. Builds and packages the image and chart.
-2. Pushes the image to GHCR and records its digest.
-3. Generates SBOMs with pinned syft.
-4. Optionally signs with cosign.
-5. Uploads the workflow artifacts.
-6. Creates a GitHub release with the chart, SBOMs, metadata, and checksums.
+1. Verifies that the tag is annotated, is an ancestor of `main`, and that the
+   tag, release, and image tag do not already exist.
+2. Runs `make release-check` and `go test -race ./...`.
+3. Builds the image, chart, and SBOMs in a read-only job.
+4. Pushes the image, signs it with keyless Sigstore, and attests provenance and
+   SBOM.
+5. Pushes the chart to GHCR OCI, signs it, and attests provenance and SBOM.
+6. Generates `values.release.yaml` with the image digest.
+7. Creates a draft GitHub release, attaches every asset, and publishes it as an
+   immutable release.
 
-Manual runs use **Actions -> release -> Run workflow** with a version and an
-optional push flag. A manual run without `push` still produces downloadable
-artifacts, so maintainers can inspect a release before publishing.
+If any signature or attestation verification fails, the GitHub release is not
+created.
 
-## Helm chart repository publishing
-
-Chart publishing is independent of the image release tag. On every push to
-`main`, `.github/workflows/chart-repo.yml` packages the chart, creates the chart
-release, keyless-signs the package with cosign, and updates the `gh-pages`
-index. Chart-releaser skips an unchanged
-`Chart.yaml` version, so bump `version` in `deploy/helm/skopos/Chart.yaml` to
-publish a new chart.
-
-The repository is:
-
-```text
-https://jawaracloud.github.io/skopos/
-```
-
-Do not edit `gh-pages` manually; see
-[chart-repository.md](chart-repository.md) for the consumer commands and the
-versioning flow.
-
-## Optional signing
-
-Signing is off by default. To enable it, set the repository variable
-`COSIGN_SIGNING=true` and choose one of:
-
-- **Keyless:** leave `COSIGN_PRIVATE_KEY` unset. The workflow uses the GitHub
-  Actions OIDC identity (`id-token: write` is already set).
-- **Key-based:** add the encrypted private key as the `COSIGN_PRIVATE_KEY`
-  secret and its password as `COSIGN_PASSWORD`.
-
-The script signs the pushed image digest and the chart package. Normal CI does
-not require either secret.
-
-## Published image digest
-
-Release values must pin the gateway image by digest. Use the
-`image_digest` line from `release-metadata.txt`:
+## Verify a release
 
 ```sh
-helm install skopos ./deploy/helm/skopos \
-  --namespace observability \
-  --set gateway.image.repository=ghcr.io/<owner>/skopos-gateway \
-  --set gateway.image.tag=0.1.0-alpha.1 \
-  --set gateway.image.digest=sha256:...
+VERSION=0.1.0-alpha.2 ./scripts/verify-release.sh
 ```
 
-The chart's default tag is for local development only. The release workflow
-does not modify the chart's default values; the integrator or a follow-up
-version bump owns that change.
+Or manually:
+
+```sh
+cosign verify ghcr.io/jawaracloud/skopos-gateway:0.1.0-alpha.2 \
+  --certificate-identity 'https://github.com/jawaracloud/skopos/.github/workflows/release.yml@refs/tags/v0.1.0-alpha.2' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+cosign verify ghcr.io/jawaracloud/charts/skopos:0.1.0-alpha.2 \
+  --certificate-identity 'https://github.com/jawaracloud/skopos/.github/workflows/release.yml@refs/tags/v0.1.0-alpha.2' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+gh attestation verify oci://ghcr.io/jawaracloud/skopos-gateway:0.1.0-alpha.2 \
+  --repo jawaracloud/skopos \
+  --signer-workflow jawaracloud/skopos/.github/workflows/release.yml
+```
+
+Do not use `--insecure-ignore-tlog`. The release workflow always records
+signatures in the transparency log.
+
+## Install a release
+
+The gateway is disabled by default. A release install uses the attached
+`values.release.yaml`, which enables the gateway and pins its digest:
+
+```sh
+helm install skopos oci://ghcr.io/jawaracloud/charts/skopos \
+  --version 0.1.0-alpha.2 \
+  -f values.release.yaml \
+  --namespace observability \
+  --create-namespace
+```
+
+Download `values.release.yaml` from the GitHub release. Verify the OCI chart
+before installing when your policy requires it.
+
+## Local dry run
+
+`make release VERSION=0.1.0-alpha.2` builds the image, chart, SBOMs, metadata,
+and checksums locally. It does not push, sign, or create a release.
+
+The repository no longer supports key-based signing or manual dispatch of a
+release. Do not add either back.

@@ -243,14 +243,18 @@ obi:
   cgroupHostPath: /sys/fs/cgroup
 
 gateway:
-  enabled: true
+  # The gateway is disabled by default so a default install never pulls a
+  # mutable or unpublished image tag. Release installs enable it with the
+  # digest-pinned values.release.yaml attached to the GitHub release. Local
+  # development may enable it with a locally built image.
+  enabled: false
   # all: query heads and public API in one process (default, current behavior).
   # frontend: proxy only, no ClickHouse. query/worker: internal query workers.
   mode: all
   replicaCount: 1
   image:
     repository: ghcr.io/jawaracloud/skopos-gateway
-    tag: 0.1.0-alpha.1
+    tag: dev
     # Release values must set a digest. Local development may leave it empty.
     digest: ""
     pullPolicy: IfNotPresent

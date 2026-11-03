@@ -28,27 +28,27 @@ ClickHouse schema, but manages the unit and schema directly.
 
 ## Install the data plane
 
-The chart is published at `https://jawaracloud.github.io/skopos/`. The gateway
-image is not published yet, so install the data plane first:
-
-```sh
-helm repo add skopos https://jawaracloud.github.io/skopos/
-helm repo update
-helm install skopos skopos/skopos \
-  --devel \
-  --namespace observability \
-  --create-namespace \
-  --set gateway.enabled=false
-```
-
-Or install from a local checkout:
+The gateway is disabled by default. Install the data plane from a local
+checkout:
 
 ```sh
 helm install skopos ./deploy/helm/skopos \
   --namespace observability \
-  --create-namespace \
-  --set gateway.enabled=false
+  --create-namespace
 ```
+
+Published releases use the OCI chart and the attached digest-pinned values:
+
+```sh
+helm install skopos oci://ghcr.io/jawaracloud/charts/skopos \
+  --version 0.1.0-alpha.2 \
+  -f values.release.yaml \
+  --namespace observability \
+  --create-namespace
+```
+
+Download `values.release.yaml` from the matching GitHub release. See
+[release.md](release.md) and [chart-repository.md](chart-repository.md).
 
 The init job waits for ClickHouse, creates the pinned schema, and creates the
 read-only gateway user. If the job fails, inspect its logs before retrying:
@@ -61,16 +61,16 @@ kubectl -n observability get pods
 ## Build and enable the gateway
 
 ```sh
-docker build -t skopos-gateway:0.1.0-alpha.1 .
+docker build -t skopos-gateway:dev .
 # k3d:
-k3d image import -c <cluster> skopos-gateway:0.1.0-alpha.1
+k3d image import -c <cluster> skopos-gateway:dev
 # kind:
-# kind load docker-image skopos-gateway:0.1.0-alpha.1
+# kind load docker-image skopos-gateway:dev
 
 helm upgrade skopos ./deploy/helm/skopos --namespace observability \
   --set gateway.enabled=true \
   --set gateway.image.repository=skopos-gateway \
-  --set gateway.image.tag=0.1.0-alpha.1 \
+  --set gateway.image.tag=dev \
   --set gateway.image.digest= \
   --set gateway.image.pullPolicy=IfNotPresent
 ```
@@ -105,6 +105,7 @@ that the gateway process is alive.
 ```sh
 helm upgrade --install skopos ./deploy/helm/skopos \
   --namespace observability \
+  --set gateway.enabled=true \
   --set distributed.enabled=true \
   --set frontend.replicaCount=2 \
   --set query.replicaCount=2

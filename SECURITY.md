@@ -4,11 +4,11 @@
 
 Do not open a public issue for a security problem. Open a private security
 advisory at
-<https://github.com/jawaracloud/skopos/security/advisories/new>. While the
-repository is private, only users with repository access can use that form. If
-the advisory form is unavailable, open a minimal public issue that asks the
-maintainers for a private channel, without disclosing the vulnerability
-details. Include the affected version or commit, a reproduction, and the impact.
+<https://github.com/jawaracloud/skopos/security/advisories/new>. The repository
+is public, so any GitHub user can use the advisory form. If the form is
+unavailable, open a minimal public issue that asks the maintainers for a
+private channel, without disclosing the vulnerability details. Include the
+affected version or commit, a reproduction, and the impact.
 
 ## Response targets
 
@@ -19,9 +19,11 @@ guarantee. Disclosure is coordinated with the reporter; the default target is
 
 ## Supported versions
 
-No release has been published yet. When the v0.1 alpha line is published, only
-the latest alpha release will be supported. Alpha releases have no compatibility
-guarantee and may receive security fixes only on the latest tag.
+Only the latest alpha release is supported. Alpha releases have no compatibility
+guarantee and may receive security fixes only on the latest tag. The
+`skopos-0.1.0-alpha.1` chart release predates the supply-chain release process
+and is kept for historical reference only; it is not covered by the signing and
+provenance guarantees below.
 
 ## Security model for v0.1
 
@@ -47,10 +49,13 @@ guarantee and may receive security fixes only on the latest tag.
   observability and trace-context propagation, so it does not grant
   `CAP_NET_ADMIN` or `CAP_SYS_ADMIN`. See `values.yaml` and OBI's security
   documentation before enabling those features.
-- **Supply chain.** Go modules use `go.sum`; images are pinned by digest; the
-  chart has no third-party subcharts. SBOM generation and signing are scaffolded
-  in the release scripts, but no release has been published or signed with
-  project keys yet.
+- **Supply chain.** Go modules use `go.sum` and a committed `vendor/` tree.
+  Third-party images are pinned by digest, GitHub Actions are pinned by commit
+  SHA, and the registry enforces SHA pinning. Releases are built from an
+  annotated tag whose commit is on `main`; images and charts are signed with
+  keyless Sigstore, SBOMs and build provenance are attested, and GitHub releases
+  are immutable. There are no long-lived signing keys. See
+  [docs/security/supply-chain.md](docs/security/supply-chain.md).
 
 ## Review status
 

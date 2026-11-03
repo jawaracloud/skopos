@@ -53,13 +53,20 @@ These tools are not linked into the gateway binary:
 
 | Tool | Version | Purpose |
 | --- | --- | --- |
-| Go | 1.27.x | Build and test |
+| Go | `go.mod` (`1.27.3`) | Build and test; CI reads the version from `go.mod` |
 | Helm | 3.19+ or 4.x | Chart lint and render |
 | govulncheck | v1.9.0 | Vulnerability scan |
 | Docker / Compose | any current release | ClickHouse integration tests, Loki/Tempo/cerberus harnesses, S3 + RustFS test, OBI e2e |
-| actionlint | v1.7.12 | Workflow syntax checks (local/release check) |
+| actionlint | v1.7.12 | Workflow syntax checks in the required `policy` job |
+| zizmor | v1.32.0 | Workflow security checks in the required `policy` job |
+| go-licenses | v1.6.0 | License allowlist check in the required `policy` job |
 | OpenSSF Scorecard CLI | v5.6.0 | Scorecard scan via `scripts/scorecard.sh`; checksum-verified, not linked into the gateway |
 | gitleaks | v8.30.1 | Local secret scan during the OpenSSF pass; not a CI dependency |
+
+Dependabot runs weekly with a five-day cooldown for Go modules, GitHub Actions,
+and Dockerfiles/Compose files. Chart image tags in `values.yaml` are upgraded by
+hand as separate, reviewed pull requests because the Dependabot Helm ecosystem
+does not update image tags in values files.
 
 ## Pinned container images
 
@@ -81,12 +88,14 @@ Reference implementations are test-only containers, pinned in their harnesses:
 | cerberus reference | `ghcr.io/tsouza/cerberus` | `v1.23.1` | `sha256:e5ced00b1ee85c371295147ed0bce9caa4a5c5554443ee8aabc329d5351dc4a5` |
 | Prometheus reference | `prom/prometheus` | `v3.15.1` | `sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2` |
 | RustFS S3 test | `rustfs/rustfs` | `1.0.4` | `sha256:ed9210d6411d77ffceb70d94b964a3cb7d225983368bc25bebe01e995293dcc2` |
-| AWS CLI test client | `amazon/aws-cli` | `2.31.7` | pinned in `test/integration/s3/docker-compose.yml` |
+| AWS CLI test client | `amazon/aws-cli` | `2.31.7` | `sha256:8173c3c7c71e25b0824025b90a85df6e24c696f646498dca9dd370ea446e4fc8` |
+| Alpine test helper | `alpine` | `3.22` | `sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f` |
 
-The Skopos gateway image is built from this repository. The default chart uses a
-tag for local development; release values must set
-`gateway.image.digest` to the published image digest. The release pipeline owns
-that digest.
+The Skopos gateway image is built from this repository. The gateway is disabled
+by default so a default install never pulls a mutable or unpublished image tag.
+Release installs use the attached `values.release.yaml`, which enables the
+gateway and sets `gateway.image.digest` to the published image digest. The
+release pipeline owns that digest.
 
 ## Schema pin
 
@@ -100,24 +109,23 @@ owns schema changes.
 
 ## Release security
 
-The release scaffolding is implemented in `scripts/release.sh`,
-`scripts/sbom-fallback.sh`, and `.github/workflows/release.yml`:
+The release path is implemented in `scripts/release.sh`,
+`scripts/verify-release.sh`, and `.github/workflows/release.yml`:
 
-- Chart package and checksums.
-- Image and chart SBOMs with syft when available, plus a CycloneDX fallback.
-- Optional cosign signing for the image digest and chart blob; key-based or
-  keyless.
-- Optional registry push; normal CI needs no secrets.
-
-Still required before publishing the alpha release:
-
-- Project-owned signing keys or OIDC identity and registry credentials.
-- A real published image digest in release values.
-- A separate, reviewed dependency and image version-bump workflow.
-- `govulncheck`, module checksum verification, vendor verification, fuzz,
-  the PromQL differential oracle, the S3/RustFS integration test, and the
-  Tempo/Loki/cerberus reference harnesses as blocking CI gates (current CI
-  runs them).
+- One annotated `vX.Y.Z` tag releases both the image and chart.
+- The tag must be an ancestor of `main`; the workflow refuses to overwrite an
+  existing image tag or GitHub release.
+- `scripts/release.sh` builds the image, chart, SBOMs, checksums, and metadata
+  only. It never pushes or signs.
+- Every image and chart is signed with keyless Sigstore using the GitHub Actions
+  OIDC identity and the transparency log. There are no long-lived signing keys.
+- GitHub artifact attestations cover provenance and SBOMs.
+- GitHub releases are created as drafts, fully populated, then published as
+  immutable releases.
+- `make release-check` runs vet, tests, Helm lint/render, module checksum
+  verification, and vendor drift checks before publishing.
+- `govulncheck`, the SQL fuzz gate, the PromQL/Loki/Tempo differentials, the
+  S3/RustFS integration test, and the Helm render matrix are blocking CI gates.
 - The official OpenSSF Scorecard action runs weekly, on pushes to `main`, and on
   manual dispatch. It publishes results to the public Scorecard API and uploads
   SARIF to code scanning. `make scorecard` remains the local CLI fallback.
