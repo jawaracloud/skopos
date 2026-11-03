@@ -259,12 +259,12 @@ jobs:
       - name: Reject blocked workflow patterns
         run: |
           set -eu
-          if grep -RIn --include='*.yml' --include='*.yaml' 'pull_request_target' .github/workflows; then
-            echo "pull_request_target is not allowed in this repository" >&2
+          if grep -RIn --include='*.yml' --include='*.yaml' 'pull_request[_]target' .github/workflows; then
+            echo "dangerous PR trigger is not allowed in this repository" >&2
             exit 1
           fi
-          if grep -RIn --include='*.yml' --include='*.yaml' 'ubuntu-latest' .github/workflows; then
-            echo "use a pinned runner image instead of ubuntu-latest" >&2
+          if grep -RIn --include='*.yml' --include='*.yaml' 'ubuntu[-]latest' .github/workflows; then
+            echo "use a pinned runner image instead of a floating runner tag" >&2
             exit 1
           fi
       - name: Install go-licenses
