@@ -58,7 +58,7 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
       - name: govulncheck
-        run: '$(go env GOPATH)/bin/govulncheck ./...'
+        run: '"$(go env GOPATH)/bin/govulncheck" ./...'
 
   integration:
     name: ClickHouse integration
@@ -253,15 +253,21 @@ jobs:
           tar -xzf /tmp/zizmor.tar.gz -C /tmp
           install -m 0755 /tmp/zizmor "$(go env GOPATH)/bin/zizmor"
       - name: actionlint
-        run: '$(go env GOPATH)/bin/actionlint'
+        run: '"$(go env GOPATH)/bin/actionlint"'
       - name: zizmor
-        run: '$(go env GOPATH)/bin/zizmor --offline --min-severity=low .github/workflows'
+        run: '"$(go env GOPATH)/bin/zizmor" --offline --min-severity=low .github/workflows'
       - name: Reject blocked workflow patterns
         run: |
           set -eu
-          ! grep -RIn --include='*.yml' --include='*.yaml' 'pull_request_target' .github/workflows
-          ! grep -RIn --include='*.yml' --include='*.yaml' 'ubuntu-latest' .github/workflows
+          if grep -RIn --include='*.yml' --include='*.yaml' 'pull_request_target' .github/workflows; then
+            echo "pull_request_target is not allowed in this repository" >&2
+            exit 1
+          fi
+          if grep -RIn --include='*.yml' --include='*.yaml' 'ubuntu-latest' .github/workflows; then
+            echo "use a pinned runner image instead of ubuntu-latest" >&2
+            exit 1
+          fi
       - name: Install go-licenses
         run: go install github.com/google/go-licenses@v1.6.0
       - name: License policy
-        run: '$(go env GOPATH)/bin/go-licenses check ./... --allowed_licenses=Apache-2.0,BSD-3-Clause,MIT,ISC'
+        run: '"$(go env GOPATH)/bin/go-licenses" check ./... --allowed_licenses=Apache-2.0,BSD-3-Clause,MIT,ISC'
