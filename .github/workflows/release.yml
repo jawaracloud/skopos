@@ -1,110 +1,514 @@
 name: release
 
+# A release is created only by pushing an annotated vX.Y.Z tag whose commit is
+# already on main. There is no manual publish path: re-run the tag workflow or
+# create a new patch tag.
+
 on:
   push:
     tags:
       - "v*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Release version without the leading v (for example 0.1.0-alpha.1)"
-        required: true
-        type: string
-      push:
-        description: "Push the gateway image to GHCR"
-        required: false
-        default: false
-        type: boolean
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
-  GO_VERSION: "1.27.x"
-  HELM_VERSION: "v3.22.1"
-  SYFT_VERSION: "v1.55.0"
-  COSIGN_VERSION: "v3.1.4"
+  HELM_VERSION: v3.22.1
+  SYFT_VERSION: v1.55.0
+  COSIGN_VERSION: v3.1.4
+  IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/skopos-gateway
+  CHART_OCI_REPOSITORY: ghcr.io/${{ github.repository_owner }}/charts
+  CHART_REF: ghcr.io/${{ github.repository_owner }}/charts/skopos
 
 jobs:
-  release:
-    name: Build, package, and optionally sign
+  preflight:
+    name: Preflight release
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
-      contents: write
-      packages: write
-      id-token: write
+      contents: read
+      packages: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
-          check-latest: true
+          go-version-file: go.mod
+          check-latest: false
+          cache: false
 
-      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: ${{ env.HELM_VERSION }}
 
-      - name: Resolve version
+      - name: Resolve and validate the tag
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            VERSION="${{ inputs.version }}"
-          else
-            VERSION="${GITHUB_REF_NAME#v}"
-          fi
-          VERSION="${VERSION#v}"
-          case "$VERSION" in
-            ''|*[!0-9A-Za-z_.+-]*) echo "invalid version: $VERSION" >&2; exit 1 ;;
+          set -eu
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          case "$version" in
+            ''|*[!0-9A-Za-z_.+-]*) echo "invalid version: $version" >&2; exit 1 ;;
           esac
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "releasing $VERSION"
+          test "$(git cat-file -t "$GITHUB_REF")" = "tag" || {
+            echo "release tags must be annotated" >&2
+            exit 1
+          }
+          commit_sha="$(git rev-parse "${GITHUB_REF}^{commit}")"
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "$commit_sha" origin/main || {
+            echo "tag commit is not on main" >&2
+            exit 1
+          }
+          chart_version="$(awk '/^version:/{print $2; exit}' deploy/helm/skopos/Chart.yaml)"
+          chart_app_version="$(awk '/^appVersion:/{gsub(/"/, "", $2); print $2; exit}' deploy/helm/skopos/Chart.yaml)"
+          test "$chart_version" = "$version" || {
+            echo "Chart.yaml version is $chart_version, expected $version" >&2
+            exit 1
+          }
+          test "$chart_app_version" = "$version" || {
+            echo "Chart.yaml appVersion is $chart_app_version, expected $version" >&2
+            exit 1
+          }
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "release $tag already exists" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Log in to GHCR
-        if: github.event_name == 'push' || inputs.push
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - name: Refuse to overwrite an existing image tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -eu
+          version="$VERSION"
+          if tags="$(gh api \
+            "/orgs/${GITHUB_REPOSITORY_OWNER}/packages/container/skopos-gateway/versions" \
+            --jq '.[].metadata.container.tags[]?' 2>/dev/null)"; then
+            if printf '%s\n' "$tags" | grep -qx "$version"; then
+              echo "image tag $version already exists" >&2
+              exit 1
+            fi
+          fi
+
+      - name: Run release checks
+        run: |
+          make release-check
+          go test -race ./...
+
+  build:
+    name: Build release artifacts
+    runs-on: ubuntu-24.04
+    needs: preflight
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: false
+
+      - name: Set up Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
+        with:
+          version: ${{ env.HELM_VERSION }}
 
       - name: Download syft
         uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           syft-version: ${{ env.SYFT_VERSION }}
 
+      - name: Build image, chart, and SBOMs
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CHART_VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          OUTPUT_DIR: dist/release
+        run: ./scripts/release.sh
+
+      - name: Save the image for the publish job
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+        run: |
+          set -eu
+          docker save "${IMAGE_REPOSITORY}:${VERSION}" \
+            -o "dist/release/skopos-gateway-${VERSION}.tar"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-bundle
+          path: dist/release/*
+          if-no-files-found: error
+
+  publish-image:
+    name: Publish and attest image
+    runs-on: ubuntu-24.04
+    needs: [preflight, build]
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-bundle
+          path: dist/release
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Push the image and capture its digest
+        id: push
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+        run: |
+          set -eu
+          image="${IMAGE_REPOSITORY}:${VERSION}"
+          docker load -i "dist/release/skopos-gateway-${VERSION}.tar"
+          push_output="$(docker push "$image")"
+          printf '%s\n' "$push_output"
+          digest="$(printf '%s\n' "$push_output" | sed -n 's/^digest: //p' | tail -n 1)"
+          if [ -z "$digest" ]; then
+            digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" \
+              | grep "^${IMAGE_REPOSITORY}@sha256:" | head -n 1 | cut -d@ -f2)"
+          fi
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
       - name: Install cosign
-        if: vars.COSIGN_SIGNING == 'true'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: ${{ env.COSIGN_VERSION }}
 
-      - name: Build release artifacts
+      - name: Sign the image
         env:
-          VERSION: ${{ steps.version.outputs.version }}
-          IMAGE_REPOSITORY: ghcr.io/${{ github.repository_owner }}/skopos-gateway
-          PUSH: ${{ (github.event_name == 'push' || inputs.push) && '1' || '0' }}
-          SIGN: ${{ vars.COSIGN_SIGNING == 'true' && '1' || '0' }}
-          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          DIGEST: ${{ steps.push.outputs.digest }}
         run: |
-          if [ -n "${COSIGN_PRIVATE_KEY:-}" ]; then
-            printf '%s' "$COSIGN_PRIVATE_KEY" > "$RUNNER_TEMP/cosign.key"
-            export COSIGN_KEY="$RUNNER_TEMP/cosign.key"
-          fi
-          ./scripts/release.sh
+          set -eu
+          cosign sign --yes \
+            --bundle "dist/release/skopos-gateway-${VERSION}.sigstore.json" \
+            "${IMAGE_REPOSITORY}@${DIGEST}"
 
-      - name: Upload release artifacts
+      - name: Attest image provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest image SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: dist/release/skopos-gateway-${{ needs.preflight.outputs.version }}.spdx.json
+          push-to-registry: true
+
+      - name: Verify the image signature
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          WORKFLOW_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          set -eu
+          cosign verify "${IMAGE_REPOSITORY}@${DIGEST}" \
+            --certificate-identity "$WORKFLOW_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      - name: Upload image signature bundle
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: skopos-release-${{ steps.version.outputs.version }}
-          path: dist/release/*
+          name: release-image-attestations
+          path: dist/release/skopos-gateway-*.sigstore.json
           if-no-files-found: error
 
-      - name: Publish GitHub release
-        if: startsWith(github.ref, 'refs/tags/')
+  publish-chart:
+    name: Publish and attest chart
+    runs-on: ubuntu-24.04
+    needs: [preflight, build, publish-image]
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-bundle
+          path: dist/release
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: ${{ env.COSIGN_VERSION }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Log in to GHCR for Helm
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" dist/release/* --generate-notes --title "$GITHUB_REF_NAME"
+          GH_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: |
+          set -eu
+          printf '%s' "$GH_TOKEN" | helm registry login ghcr.io \
+            --username "$GHCR_USER" \
+            --password-stdin
+
+      - name: Push the chart and capture its digest
+        id: push
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CHART_OCI_REPOSITORY: ${{ env.CHART_OCI_REPOSITORY }}
+        run: |
+          set -eu
+          push_output="$(helm push \
+            "dist/release/skopos-${VERSION}.tgz" \
+            "oci://${CHART_OCI_REPOSITORY}")"
+          printf '%s\n' "$push_output"
+          digest="$(printf '%s\n' "$push_output" | awk '/^Digest:/{print $2; exit}')"
+          test -n "$digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Sign the chart
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CHART_REF: ${{ env.CHART_REF }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -eu
+          cosign sign --yes \
+            --bundle "dist/release/skopos-chart-${VERSION}.sigstore.json" \
+            "${CHART_REF}@${DIGEST}"
+
+      - name: Attest chart provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.CHART_REF }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest chart SBOM
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.CHART_REF }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: dist/release/skopos-chart-${{ needs.preflight.outputs.version }}.spdx.json
+          push-to-registry: true
+
+      - name: Verify the chart signature
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CHART_REF: ${{ env.CHART_REF }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+          WORKFLOW_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          set -eu
+          cosign verify "${CHART_REF}@${DIGEST}" \
+            --certificate-identity "$WORKFLOW_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+
+      - name: Generate release values
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          IMAGE_DIGEST: ${{ needs.publish-image.outputs.digest }}
+        run: |
+          set -eu
+          cat > dist/release/values.release.yaml <<EOF
+          gateway:
+            enabled: true
+            image:
+              repository: ${IMAGE_REPOSITORY}
+              tag: "${VERSION}"
+              digest: "${IMAGE_DIGEST}"
+          EOF
+
+      - name: Verify the published chart renders with the release values
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          CHART_OCI_REPOSITORY: ${{ env.CHART_OCI_REPOSITORY }}
+        run: |
+          set -eu
+          helm template skopos "oci://${CHART_OCI_REPOSITORY}/skopos" \
+            --version "$VERSION" \
+            --namespace observability \
+            -f dist/release/values.release.yaml >/dev/null
+
+      - name: Upload chart signature and release values
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-chart-attestations
+          path: |
+            dist/release/skopos-chart-*.sigstore.json
+            dist/release/values.release.yaml
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish immutable GitHub release
+    runs-on: ubuntu-24.04
+    needs: [preflight, build, publish-image, publish-chart]
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-bundle
+          path: release-assets
+
+      - name: Download image attestations
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-image-attestations
+          path: release-assets
+
+      - name: Download chart attestations
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release-chart-attestations
+          path: release-assets
+
+      - name: Prepare release metadata
+        env:
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          IMAGE_DIGEST: ${{ needs.publish-image.outputs.digest }}
+          CHART_REF: ${{ env.CHART_REF }}
+          CHART_DIGEST: ${{ needs.publish-chart.outputs.digest }}
+        run: |
+          set -eu
+          cat >> release-assets/release-metadata.txt <<EOF
+          image_digest=${IMAGE_DIGEST}
+          chart_ref=${CHART_REF}
+          chart_digest=${CHART_DIGEST}
+          release_tag=${GITHUB_REF_NAME}
+          EOF
+          (
+            cd release-assets
+            sha256sum \
+              "skopos-${VERSION}.tgz" \
+              "skopos-gateway-${VERSION}.spdx.json" \
+              "skopos-chart-${VERSION}.spdx.json" \
+              "values.release.yaml" \
+              "release-metadata.txt" > SHA256SUMS
+          )
+
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.preflight.outputs.version }}
+          IMAGE_REPOSITORY: ${{ env.IMAGE_REPOSITORY }}
+          IMAGE_DIGEST: ${{ needs.publish-image.outputs.digest }}
+          CHART_REF: ${{ env.CHART_REF }}
+          CHART_DIGEST: ${{ needs.publish-chart.outputs.digest }}
+        run: |
+          set -eu
+          cat > release-notes.md <<EOF
+          ## Skopos ${VERSION}
+
+          Container image:
+
+          \`${IMAGE_REPOSITORY}@${IMAGE_DIGEST}\`
+
+          Helm chart:
+
+          \`oci://${CHART_REF}@${CHART_DIGEST}\`
+
+          ### Verify
+
+          \`\`\`sh
+          cosign verify \\
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \\
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \\
+            "${IMAGE_REPOSITORY}@${IMAGE_DIGEST}"
+
+          cosign verify \\
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@refs/tags/${GITHUB_REF_NAME}" \\
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \\
+            "${CHART_REF}@${CHART_DIGEST}"
+
+          gh attestation verify "oci://${IMAGE_REPOSITORY}@${IMAGE_DIGEST}" \\
+            --repo "${GITHUB_REPOSITORY}" \\
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml"
+          \`\`\`
+
+          Install with the attached release values:
+
+          \`\`\`sh
+          helm install skopos "oci://${CHART_REF}" \\
+            --version "${VERSION}" \\
+            -f values.release.yaml \\
+            --namespace observability --create-namespace
+          \`\`\`
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --verify-tag \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file release-notes.md
+          gh release upload "$GITHUB_REF_NAME" \
+            "release-assets/skopos-${VERSION}.tgz" \
+            "release-assets/skopos-gateway-${VERSION}.spdx.json" \
+            "release-assets/skopos-chart-${VERSION}.spdx.json" \
+            "release-assets/skopos-gateway-${VERSION}.sigstore.json" \
+            "release-assets/skopos-chart-${VERSION}.sigstore.json" \
+            "release-assets/values.release.yaml" \
+            "release-assets/release-metadata.txt" \
+            "release-assets/SHA256SUMS"
+          if printf '%s' "$VERSION" | grep -q -- '-'; then
+            gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease
+          else
+            gh release edit "$GITHUB_REF_NAME" --draft=false
+          fi

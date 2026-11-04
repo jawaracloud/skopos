@@ -7,7 +7,7 @@ VERSION ?= 0.1.0-alpha.1
 LDFLAGS := -s -w -X main.version=$(VERSION)
 CHART := deploy/helm/skopos
 
-.PHONY: help build mcp test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus storage-test bench release release-dry-run release-check scorecard
+.PHONY: help build mcp test test-race test-integration fuzz vet vuln helm-lint helm-template check clean e2e-obi compat-cerberus storage-test bench release release-dry-run release-check verify-release scorecard
 
 help:
 	@printf '%s\n' \
@@ -26,8 +26,9 @@ help:
 		'storage-test      run ClickHouse + RustFS tiered storage and backup test' \
 		'bench             run the ClickHouse compression and gateway latency benchmark' \
 		'release           build and package release artifacts (VERSION=...)' \
-		'release-dry-run   release build without pushing or signing' \
-		'release-check     release preflight: vet, tests, Helm, script syntax' \
+		'release-dry-run   same as release; the release workflow publishes' \
+		'release-check     release preflight: vet, tests, Helm, vendor, script syntax' \
+		'verify-release    verify signatures and attestations for VERSION=...' \
 		'scorecard         run pinned OpenSSF Scorecard (needs GITHUB_AUTH_TOKEN)' \
 		'check             vet + test + fuzz + helm lint'
 
@@ -82,15 +83,22 @@ release:
 	VERSION=$(VERSION) ./scripts/release.sh
 
 release-dry-run:
-	VERSION=$(VERSION) PUSH=0 SIGN=0 ./scripts/release.sh
+	VERSION=$(VERSION) ./scripts/release.sh
+
+verify-release:
+	VERSION=$(VERSION) ./scripts/verify-release.sh
 
 scorecard:
 	./scripts/scorecard.sh
 
 release-check: vet test helm-lint
+	$(GO) mod verify
+	$(GO) mod vendor
+	git diff --exit-code -- vendor go.mod go.sum
 	$(HELM) template skopos $(CHART) --namespace observability >/dev/null
 	cd test/compat/prometheus && $(GO) mod verify && $(GO) vet ./... && $(GO) test -count=1 ./...
 	sh -n scripts/release.sh
+	sh -n scripts/verify-release.sh
 	sh -n scripts/sbom-fallback.sh
 	sh -n scripts/scorecard.sh
 	sh -n test/e2e/obi/run.sh

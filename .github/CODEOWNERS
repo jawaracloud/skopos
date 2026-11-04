@@ -4,4 +4,11 @@
 # Keep this file in sync with GOVERNANCE.md. A CODEOWNERS handle that cannot
 # write to the repository is ignored by GitHub, so verify access before adding
 # a new owner.
+#
+# CODEOWNERS is a routing mechanism, not a second-person security gate while
+# there is only one maintainer. The enforced gates are the repository rulesets
+# and required checks.
 * @mrofisr
+
+/.github/            @mrofisr
+/docs/security/      @mrofisr

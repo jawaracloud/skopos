@@ -34,6 +34,29 @@ CONTRIBUTING.md and ADR 0001:
 
 Agent-generated changes do not bypass these gates.
 
+## Release authority
+
+Releases are created only by pushing an annotated `vX.Y.Z` tag whose commit is
+already on `main`. The tag ruleset restricts tag creation to repository admins.
+There is no manual publish workflow and no long-lived signing key.
+
+The `main` ruleset requires a pull request, green required checks, and linear
+history, and it applies to admins. Zero approvals are required because the
+project currently has one maintainer; the gate is the PR and the checks, not a
+fake second reviewer.
+
+The admin can edit the rulesets as a break-glass action. Any use of break-glass
+must be recorded in the pull request or incident notes and reviewed when a
+second maintainer is available.
+
+## Agent access
+
+Automation and agents must use a dedicated non-admin identity with repository
+contents and pull-request write access. The identity must not have repository
+administration, workflow-file write, or secret access. Agents propose changes
+through pull requests; they do not merge to `main`, create release tags, or run
+releases.
+
 ## Becoming a maintainer
 
 There is no fixed contribution quota. A contributor may be invited to become a

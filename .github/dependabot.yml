@@ -3,6 +3,10 @@ version: 2
 # Dependency bumps are separate, human-reviewed PRs per CONTRIBUTING.md. Keep
 # the open-PR limit low so updates do not crowd out feature work. Grouped
 # minor/patch updates reduce noise; major updates stay individual for review.
+#
+# The five-day cooldown gives a compromised upstream release time to be noticed
+# and yanked before this project opens a pull request. Security updates are not
+# delayed by Dependabot.
 updates:
   - package-ecosystem: gomod
     directory: "/"
@@ -10,6 +14,8 @@ updates:
       interval: weekly
       day: monday
       time: "04:00"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 3
     commit-message:
       prefix: deps
@@ -28,6 +34,8 @@ updates:
       interval: weekly
       day: monday
       time: "04:10"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 3
     commit-message:
       prefix: deps
@@ -46,6 +54,8 @@ updates:
       interval: weekly
       day: monday
       time: "04:20"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 3
     commit-message:
       prefix: deps
@@ -58,12 +68,53 @@ updates:
           - minor
           - patch
 
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:25"
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+
+  - package-ecosystem: docker
+    directory: "/test/integration/s3"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:27"
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+
+  - package-ecosystem: docker
+    directory: "/test/e2e/obi/app"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:29"
+    cooldown:
+      default-days: 5
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: deps
+      include: scope
+
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
       day: monday
       time: "04:30"
+    cooldown:
+      default-days: 5
     open-pull-requests-limit: 3
     commit-message:
       prefix: deps

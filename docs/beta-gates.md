@@ -21,7 +21,7 @@ reproducible on the pinned references.
 | `helm lint` + render | **Passed** | Helm 3.22.1 and 4.3.1; CI renders default, overrides, digest-pinned gateway, distributed frontend/query, and storage/backup shapes. | — |
 | Real OBI e2e | **Passed on host** | `make e2e-obi`: real OBI v1.0.0, kernel 6.18, BTF/tracefs, metrics + traces + Tempo search/trace/tags + v2 protobuf. | GitHub-hosted runners cannot provide privileged eBPF; keep manual or use a privileged runner/VM. |
 | Compression and latency | **Measured** | `docs/benchmarks.md`: 7.96 B/metric sample, 83.92 B/log line, 24.58 B/span; p95 table. | Re-run on reference hardware and with real customer cardinality. |
-| Release signing/publishing | **Partial** | The Helm chart is published at `https://jawaracloud.github.io/skopos/` and `skopos-0.1.0-alpha.1.tgz` is keyless-signed with a `.sig`/`.pem` pair (Scorecard Signed-Releases 8). The image release/SBOM/provenance is still scaffolded. | Publish the gateway image and SBOM/provenance; keep chart signing in the release workflow. |
+| Release signing/publishing | **Implemented, first release pending** | The release workflow is tag-only, verifies the tag is on `main`, and publishes the image and OCI chart with keyless Sigstore signatures, SBOM/provenance attestations, and an immutable GitHub release. The first compliant release is `v0.1.0-alpha.2`. | Publish `v0.1.0-alpha.2` and record the verification output. |
 
 ## Signals and storage evidence
 

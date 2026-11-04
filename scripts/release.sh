@@ -1,18 +1,17 @@
 #!/bin/sh
 # Build release artifacts for Skopos:
-#   - gateway container image (optionally pushed)
+#   - gateway container image (local build only)
 #   - packaged Helm chart
 #   - SBOMs (syft when available, documented Go/chart inventory fallback)
 #   - SHA256SUMS and release metadata
-#   - optional cosign signatures
+#
+# Publishing, signing, and attestation happen in .github/workflows/release.yml.
 #
 # Usage:
 #   VERSION=0.1.0-alpha.1 ./scripts/release.sh
-#   VERSION=0.1.0-alpha.1 PUSH=1 IMAGE_REPOSITORY=ghcr.io/me/skopos-gateway ./scripts/release.sh
-#   VERSION=0.1.0-alpha.1 SIGN=1 COSIGN_KEY=/path/cosign.key ./scripts/release.sh
+#   VERSION=0.1.0-alpha.1 OUTPUT_DIR=dist/release ./scripts/release.sh
 #
-# Exit codes are non-zero on any failed verification. Normal CI does not run
-# this script; the release workflow invokes it only for tags or manual runs.
+# This script never pushes to a registry and never reads signing keys.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
@@ -27,8 +26,6 @@ chart_version=${CHART_VERSION:-$version}
 image_repository=${IMAGE_REPOSITORY:-ghcr.io/jawaracloud/skopos-gateway}
 image="$image_repository:$version"
 output_dir=${OUTPUT_DIR:-$root/dist/release}
-push=${PUSH:-0}
-sign=${SIGN:-0}
 
 fail() {
   echo "release: $*" >&2
@@ -76,21 +73,7 @@ docker build \
   --build-arg "VERSION=$version" \
   -t "$image" \
   "$root"
-
-digest=""
-if [ "$push" = "1" ]; then
-  echo "release: pushing $image"
-  push_output=$(docker push "$image")
-  printf '%s\n' "$push_output"
-  digest=$(printf '%s\n' "$push_output" | sed -n 's/^digest: //p' | tail -n 1)
-  if [ -z "$digest" ]; then
-    digest=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" \
-      | grep "^$image_repository@sha256:" | head -n 1 | cut -d@ -f2 || true)
-  fi
-  [ -n "$digest" ] || fail "could not determine the pushed image digest"
-else
-  digest=$(docker image inspect --format '{{.Id}}' "$image")
-fi
+image_id=$(docker image inspect --format '{{.Id}}' "$image")
 
 echo "release: generating SBOMs"
 if command -v syft >/dev/null 2>&1; then
@@ -107,36 +90,13 @@ name=skopos
 version=$version
 chart_version=$chart_version
 image=$image
-image_digest=$digest
-pushed=$push
-signed=$sign
+image_id=$image_id
 commit=$(git -C "$root" rev-parse HEAD 2>/dev/null || echo unknown)
 created_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 EOF
 
-if [ "$sign" = "1" ]; then
-  command -v cosign >/dev/null 2>&1 || fail "SIGN=1 requires cosign"
-  [ "$push" = "1" ] || fail "SIGN=1 requires PUSH=1 so the image has a digest"
-  [ -n "$digest" ] || fail "SIGN=1 requires an image digest"
-
-  if [ -n "${COSIGN_KEY:-}" ]; then
-    [ -f "$COSIGN_KEY" ] || fail "COSIGN_KEY does not exist: $COSIGN_KEY"
-    echo "release: signing image and chart with key $COSIGN_KEY"
-    cosign sign --yes --key "$COSIGN_KEY" "$image_repository@$digest"
-    cosign sign-blob --yes --key "$COSIGN_KEY" \
-      --output-signature "$chart_package.sig" \
-      "$chart_package"
-  else
-    echo "release: signing image and chart keylessly (ambient OIDC required)"
-    cosign sign --yes "$image_repository@$digest"
-    cosign sign-blob --yes \
-      --output-signature "$chart_package.sig" \
-      "$chart_package"
-  fi
-fi
-
-# Checksums cover the chart and every SBOM. Signatures are produced after the
-# artifacts they cover and are intentionally not checksummed themselves.
+# Checksums cover the chart, SBOMs, and metadata. The image tar and signatures
+# are produced later by the release workflow and are intentionally excluded.
 (
   cd "$output_dir"
   sha256sum ./*.tgz ./*.spdx.json ./*.cdx.json ./release-metadata.txt 2>/dev/null >SHA256SUMS || true

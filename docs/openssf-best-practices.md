@@ -15,8 +15,11 @@ maintainer still has to submit this draft at <https://www.bestpractices.dev/>.
 
 Other known gaps that are **not** hidden by this draft:
 
-- No release has been published, tagged, or signed. Release notes, unique
-  version identifiers, and signed-release evidence are therefore absent.
+- No image release under the current supply-chain process has been published.
+  The legacy `skopos-0.1.0-alpha.1` chart release exists, but it predates the
+  tag-only, keyless-signed, immutable release process. Release notes, unique
+  version identifiers for the image, and signed-image evidence are therefore
+  still pending until `v0.1.0-alpha.2` is published.
 - There is no independent human security review yet. This is a Gold-level
   criterion and a documented beta gate, not something this draft claims.
 - The full Prometheus compliance tester and the full Loki benchmark corpus are
@@ -64,10 +67,10 @@ Other known gaps that are **not** hidden by this draft:
 | `repo_track` | Met | Git history records author, timestamp, and change in every commit. |
 | `repo_interim` | Met | The repository contains dozens of incremental commits and feature branches, not only final release snapshots. |
 | `repo_distributed` | Met | Git is used. |
-| `version_unique` | Not met | No user-facing release exists, so there is no released version identifier to evaluate. The in-tree `VERSION ?= 0.1.0-alpha.1` is a build default, not a published release. |
+| `version_unique` | Not met | No image release under the current process exists yet. The in-tree `VERSION ?= 0.1.0-alpha.1` is a build default, not a published image release. Publish `v0.1.0-alpha.2` to satisfy this criterion. |
 | `version_semver` | Met (release pending) | The in-tree version and chart `appVersion` use SemVer (`0.1.0-alpha.1`). Publish a release with the same scheme. |
-| `version_tags` | Not met | `git tag --list` is empty and there are no GitHub releases. Create an annotated `v0.1.0-alpha.1` tag when the first release is published. |
-| `release_notes` | Not met | No release exists. The release workflow currently uses `gh release create --generate-notes`; before release, write human-readable notes that explain upgrade impact rather than relying on raw commit output. |
+| `version_tags` | Not met | Only the legacy lightweight chart tag `skopos-0.1.0-alpha.1` exists. Create an annotated `v0.1.0-alpha.2` tag and release for the first image release under the new process. |
+| `release_notes` | Not met | No image release exists. The release workflow writes notes with the image digest, chart digest, and verification commands. Publish `v0.1.0-alpha.2` and record the notes. |
 | `release_notes_vulns` | N/A | No release exists and there are no publicly known fixed vulnerabilities to list. Revisit for every release that fixes a CVE. |
 
 ## Reporting
@@ -117,7 +120,7 @@ Other known gaps that are **not** hidden by this draft:
 | `crypto_password_storage` | Met (caveat) | Optional Basic auth credentials live in a Kubernetes Secret and are compared in constant time in the gateway process. The Secret at-rest protection depends on the cluster (enable etcd encryption); Basic auth must run over TLS. |
 | `crypto_random` | N/A | The gateway does not generate keys or nonces. |
 | `delivery_mitm` | Met (release pending) | Source is delivered over HTTPS GitHub; release images would use HTTPS/GHCR. No binary release exists yet, so the release path is not demonstrated. |
-| `delivery_unsigned` | N/A | No cryptographic hashes are published over HTTP. Release checksums are inside the release artifacts; no release exists yet. |
+| `delivery_unsigned` | N/A | Release checksums are published inside the release assets over HTTPS. The legacy chart release is keyless-signed; the first image release under the new process is pending. |
 | `vulnerabilities_fixed_60_days` | Met (caveat) | `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). Scorecard's OSV scan flags `golang.org/x/net` v0.60.0 in `go.sum`; it is not in `vendor/modules.txt`. Update it in the next human-reviewed dependency PR. |
 | `vulnerabilities_critical_fixed` | N/A | No critical vulnerabilities have been reported. |
 | `no_leaked_credentials` | Met | Gitleaks v8.30.1 scanned all 27 commits and the working tree on 2026-11-01 with no leaks. GitHub secret scanning and push protection are enabled on the public repository; the repository also has private vulnerability reporting and Dependabot alerts/security updates. |
@@ -126,7 +129,7 @@ Other known gaps that are **not** hidden by this draft:
 
 | ID | Status | Evidence and action |
 | --- | --- | --- |
-| `static_analysis` | Met | `go vet ./...` is a static analysis tool beyond compiler warnings and runs on every push/PR. `actionlint` is used for workflow changes. |
+| `static_analysis` | Met | `go vet ./...` runs on every push/PR. `actionlint` and `zizmor` run in the required `policy` job, and `zizmor` checks workflow permissions, template injection, and dangerous triggers. |
 | `static_analysis_common_vulnerabilities` | Met | Default CodeQL setup for Go was enabled on 2026-11-01; the first analysis completed successfully and uploads SARIF to code scanning. `govulncheck` covers dependency vulnerabilities separately. |
 | `static_analysis_fixed` | N/A | No confirmed medium-or-higher static-analysis finding is open. |
 | `static_analysis_often` | Met | `ci.yml` runs `go vet` on every push and pull request. |

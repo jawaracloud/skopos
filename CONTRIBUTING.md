@@ -22,6 +22,13 @@ These rules are part of ADR 0001 and are not optional.
 7. **No copied code.** Do not copy code from cerberus, oteldb, Loki, or Tempo.
    Loki and Tempo are AGPL-licensed. They are run only as reference binaries or
    containers in CI, and comparisons are black-box.
+8. **Agents use the agent identity.** Agent work uses the dedicated non-admin
+   token or GitHub App described in `GOVERNANCE.md`. Agents do not push to
+   `main`, create release tags, read release secrets, or modify workflows with
+   an admin credential.
+9. **Releases are tag-only.** Do not add a manual publish path, a key-based
+   signing path, or a mutable chart release from `main`. Follow
+   [docs/release.md](docs/release.md).
 
 ## Test seams
 

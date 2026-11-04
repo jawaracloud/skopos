@@ -30,9 +30,18 @@ budgets, and MCP tools.
 | --- | --- |
 | [Installation and operations](install.md) | Helm chart, ClickHouse, Collector, OBI, Grafana, auth |
 | [Running as systemd](systemd.md) | Single process or frontend/query split without Kubernetes |
-| [Helm chart repository](chart-repository.md) | `helm repo add`, chart versioning, signed chart releases |
+| [Helm chart distribution](chart-repository.md) | OCI chart install, chart versioning, signature verification |
 | [Tiered storage and backups](storage.md) | Hot/cold S3 storage, TTL, `BACKUP`/`RESTORE`, RustFS test |
-| [Release process](release.md) | Image/chart release, SBOM, optional signing, chart repo publishing |
+| [Release process](release.md) | Tag-only image/OCI chart release, SBOM, keyless signing, attestations, immutable releases |
+
+## Security
+
+| Document | Answers |
+| --- | --- |
+| [Supply-chain controls](security/supply-chain.md) | What protects the pipeline, where each control lives, and the remaining gaps |
+| [Supply-chain threat model](security/threat-model.md) | Assets, actors, trust boundaries, top threats, residual risk |
+| [Agent and automation access](security/agent-access.md) | Non-admin token, verification, rotation |
+| [Incident response](security/incident-response.md) | Token compromise, bad release, registry incident, recovery |
 
 ## Compatibility
 

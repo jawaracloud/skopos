@@ -44,8 +44,8 @@ existing Grafana.
 | AI SRE context API | Alpha | Optional compact catalog for metrics, services, logs, and traces, plus stdio/HTTP MCP tools. Unknown signals can include ClickHouse observed metadata labeled `known:false`/`observed_only`; observed-only suggestions require human review. Coverage is exposed as JSON and `/metrics`. See [docs/ai-context.md](docs/ai-context.md). |
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
-| OpenSSF | Measured, public | Official Scorecard action reports **7.8** and publishes the badge. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
-| Release tooling | Partial | Chart repository is live and the chart release is keyless-signed; image publishing, SBOM attachment, and provenance are still scaffolded. See [docs/release.md](docs/release.md). |
+| OpenSSF | Measured, public | The last official Scorecard snapshot reports **7.8**; it predates the release hardening and will be re-run after `v0.1.0-alpha.2`. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
+| Release tooling | Implemented, first release pending | One annotated `vX.Y.Z` tag releases the image and OCI chart; the workflow verifies the tag is on `main`, then signs, attests, and publishes immutable artifacts. The first compliant release is `v0.1.0-alpha.2`. See [docs/release.md](docs/release.md). |
 
 The gateway serves `/healthz`, `/readyz`, `/version`, and the alpha PromQL,
 TraceQL, and LogQL endpoints. Unsupported functions return an explicit error.
@@ -113,40 +113,39 @@ Prerequisites:
 - Helm 3.19+ or Helm 4.
 - A default StorageClass, or set `clickhouse.persistence.storageClass`.
 
-The gateway image is not published yet. For a data-plane-only install from the
-local chart:
+The gateway is disabled by default, so a local data-plane install works without
+an image:
 
 ```sh
 helm install skopos ./deploy/helm/skopos \
   --namespace observability \
-  --create-namespace \
-  --set gateway.enabled=false
+  --create-namespace
 ```
 
-Or install from the published Helm chart repository:
+Published releases use the OCI chart and the attached digest-pinned values:
 
 ```sh
-helm repo add skopos https://jawaracloud.github.io/skopos/
-helm repo update
-helm install skopos skopos/skopos \
-  --devel \
+helm install skopos oci://ghcr.io/jawaracloud/charts/skopos \
+  --version 0.1.0-alpha.2 \
+  -f values.release.yaml \
   --namespace observability \
-  --create-namespace \
-  --set gateway.enabled=false
+  --create-namespace
 ```
 
-See [docs/chart-repository.md](docs/chart-repository.md) for chart versioning and
-the release flow.
+Download `values.release.yaml` from the matching GitHub release. See
+[docs/release.md](docs/release.md) and
+[docs/chart-repository.md](docs/chart-repository.md) for verification and the
+release flow.
 
 To build and run the gateway locally:
 
 ```sh
-docker build -t skopos-gateway:0.1.0-alpha.1 .
-# For k3d: k3d image import -c <cluster> skopos-gateway:0.1.0-alpha.1
+docker build -t skopos-gateway:dev .
+# For k3d: k3d image import -c <cluster> skopos-gateway:dev
 helm upgrade skopos ./deploy/helm/skopos --namespace observability \
   --set gateway.enabled=true \
   --set gateway.image.repository=skopos-gateway \
-  --set gateway.image.tag=0.1.0-alpha.1 \
+  --set gateway.image.tag=dev \
   --set gateway.image.digest= \
   --set gateway.image.pullPolicy=IfNotPresent
 ```
@@ -155,6 +154,7 @@ For the distributed read path:
 
 ```sh
 helm upgrade skopos ./deploy/helm/skopos --namespace observability \
+  --set gateway.enabled=true \
   --set distributed.enabled=true \
   --set frontend.replicaCount=2 \
   --set query.replicaCount=2

@@ -4,6 +4,11 @@ This page records how Skopos is scanned, what the current results mean, and
 which findings need a maintainer action. It is an evidence log, not a badge
 claim.
 
+> **Status note:** the 7.8 snapshot below predates the supply-chain release
+> hardening. It still describes the legacy chart release and the old branch
+> protection. Re-run the scorecard after `v0.1.0-alpha.2` is published and update
+> the table. Do not quote the old score as the current posture.
+
 ## Public repository and workflows
 
 `github.com/jawaracloud/skopos` became public on 2026-11-01. The official
@@ -67,7 +72,7 @@ diagnostic, not a badge.
 | Check | Score | What the latest run found | Evidence / next action |
 | --- | --- | --- | --- |
 | Binary-Artifacts | 10 | No binaries found. | `bin/` and `dist/` are git-ignored; the Docker build produces the binary outside the source tree. |
-| Branch-Protection | -1 | The action token cannot read classic branch protection rules. | Branch protection **is configured** on `main`: PR required, one approval, six required status checks, linear history, no force push/deletion, conversation resolution. Add a fine-grained `SCORECARD_TOKEN` secret with **Administration: read-only** and uncomment the `repo_token` line in the workflow; without that token Scorecard cannot score this check. `enforce_admins` is currently false so the maintainer can recover from a broken workflow; enable it when a second maintainer/PR process exists. |
+| Branch-Protection | -1 | The action token cannot read the repository ruleset. | `main` now uses a ruleset: PR required, zero approvals, required checks, linear history, no force push/deletion, and `enforce_admins=true`. A tag ruleset restricts `v*` creation to admins. Add a fine-grained `SCORECARD_TOKEN` with **Administration: read-only** only if the branch-protection score is worth the long-lived secret; otherwise record `-1` as a measurement gap. |
 | CI-Tests | 10 | 1/1 merged PR checked by CI. | PR #1 ran the full CI matrix before merge. Keep using PRs so this stays measured. |
 | CII-Best-Practices | 0 | No badge effort detected. | The application draft is in [openssf-best-practices.md](openssf-best-practices.md). The repository is now public; the remaining step is to submit at bestpractices.dev and answer the human-attestation criteria. |
 | Code-Review | 0 | 0/30 approved changesets. | Agent commits were pushed directly to `main`. Use PRs with at least one human approval; branch protection now requires it for non-admin contributors. |
@@ -81,7 +86,7 @@ diagnostic, not a badge.
 | Pinned-Dependencies | 10 | All GitHub Actions and container images are pinned by commit SHA or digest. | `ci.yml`, `release.yml`, and the Scorecard workflow are SHA-pinned; the chart images are digest-pinned. Re-check after every action bump. |
 | SAST | 10 | SAST runs on all commits. | Default CodeQL setup for Go was enabled on 2026-11-01; the first analysis and the PR #1 analysis passed. `go vet`, `govulncheck`, and the fuzz gate also run. |
 | Security-Policy | 10 | Security policy file detected and linked. | `SECURITY.md` links the private advisory form and states response targets; private vulnerability reporting is enabled. |
-| Signed-Releases | 8 | 1/1 chart releases has a signed artifact. | The chart-release workflow keyless-signs `skopos-0.1.0-alpha.1.tgz` and uploads `.sig` and `.pem`. The image release still needs signing and SBOM/provenance for full supply-chain coverage. |
+| Signed-Releases | 8 | The legacy chart release has a signed artifact. | The old chart workflow signed `skopos-0.1.0-alpha.1.tgz`. The new tag-only workflow signs the image and OCI chart and attaches SBOM/provenance attestations; this row will change after `v0.1.0-alpha.2` is published. |
 | Token-Permissions | 10 | Workflow tokens follow least privilege. | `release.yml` keeps `contents: read` at the top level and scopes write permissions to the release job. `ci.yml` and the Scorecard workflow are read-only or scoped. |
 | Vulnerabilities | 8 | OSV reports `GO-2026-6860` and `GO-2026-6866` for `golang.org/x/net` v0.60.0. | The module is present in `go.sum` but not in `vendor/modules.txt`; `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). The fixed version is `golang.org/x/net` v0.62.0; update it in a separate human-reviewed dependency PR. |
 | Webhooks | N/A | No repository webhooks configured. | Verified with the repository hooks API on 2026-11-01. Re-check if a webhook is added; it must use a secret. |
@@ -94,25 +99,24 @@ a security rating.
 
 These actions cannot be done from a pull request:
 
-1. **Scorecard token.** Create a fine-grained PAT with **Administration:
-   read-only** for this repository, store it as the `SCORECARD_TOKEN` secret,
-   and re-run the workflow. This lets the Branch-Protection check read the
-   configured rules.
-2. **Branch protection.** The protection is configured; review it after adding
-   maintainers. Set `enforce_admins=true` when the maintainer no longer needs
-   the emergency bypass.
-3. **PR-based review.** PR #1 established CI-Tests evidence. Code-Review still
-   needs an approved PR; direct admin pushes bypass the rules today.
+1. **Scorecard token (optional).** A fine-grained PAT with **Administration:
+   read-only** lets the Branch-Protection check read the ruleset. This is a
+   measurement improvement, not a security control; do not add a long-lived
+   admin token just for the score.
+2. **Rulesets.** `main` and `v*` tag rulesets are the enforced path. Review them
+   after adding maintainers.
+3. **PR-based review.** Continue using PRs. Code-Review needs an approved PR by
+   a second person; with one maintainer, record this as a known gap rather than
+   faking it.
 4. **CodeQL.** Default CodeQL setup for Go is enabled; keep it on `main` and
-   review new code-scanning findings.
-5. **Release and signing.** Publish the alpha image and chart, create a GitHub
-   release with release notes, and attach signatures and SBOMs. Set
-   `COSIGN_SIGNING=true` and the key/OIDC material described in
+   review new code-scanning findings. `actionlint` and `zizmor` cover workflow
+   security.
+5. **Release and signing.** Publish `v0.1.0-alpha.2` with the tag-only workflow,
+   immutable release, keyless signatures, SBOMs, and attestations. Follow
    [release.md](release.md).
-6. **Best Practices badge.** After the repository is public and the release and
-   reporting gaps are addressed, submit the application at
-   <https://www.bestpractices.dev/> using
-   [openssf-best-practices.md](openssf-best-practices.md).
+6. **Best Practices badge.** After the first compliant release and reporting
+   history exist, submit the application at <https://www.bestpractices.dev/>
+   using [openssf-best-practices.md](openssf-best-practices.md).
 
 ## Badges
 
