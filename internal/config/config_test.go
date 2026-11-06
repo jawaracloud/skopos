@@ -2,6 +2,8 @@ package config
 
 import (
 	"log/slog"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -121,6 +123,8 @@ func TestInvalidValues(t *testing.T) {
 		{"database", "SKOPOS_CLICKHOUSE_DATABASE", "bad-name", "SKOPOS_CLICKHOUSE_DATABASE"},
 		{"table", "SKOPOS_TABLE_TRACES", "bad-name", "SKOPOS_TABLE_TRACES"},
 		{"scan rows", "SKOPOS_MAX_SCAN_ROWS", "0", "SKOPOS limits"},
+		{"scan rows overflow", "SKOPOS_MAX_SCAN_ROWS", strconv.FormatUint(uint64(math.MaxInt)+1, 10), "SKOPOS_MAX_SCAN_ROWS"},
+		{"scan rows negative", "SKOPOS_MAX_SCAN_ROWS", "-1", "SKOPOS limits"},
 		{"query range", "SKOPOS_MAX_QUERY_RANGE", "soon", "SKOPOS_MAX_QUERY_RANGE"},
 		{"empty listen", "SKOPOS_LISTEN_ADDR", "", "SKOPOS_LISTEN_ADDR"},
 		{"mode", "SKOPOS_MODE", "backend", "SKOPOS_MODE"},
@@ -138,6 +142,18 @@ func TestInvalidValues(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestMaxScanRowsAcceptsMaxInt(t *testing.T) {
+	cfg, err := FromLookup(lookupFrom(map[string]string{
+		"SKOPOS_MAX_SCAN_ROWS": strconv.Itoa(math.MaxInt),
+	}))
+	if err != nil {
+		t.Fatalf("FromLookup: %v", err)
+	}
+	if cfg.MaxScanRows != math.MaxInt {
+		t.Fatalf("MaxScanRows = %d, want %d", cfg.MaxScanRows, math.MaxInt)
 	}
 }
 
