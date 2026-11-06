@@ -56,6 +56,18 @@ app.kubernetes.io/component: {{ $component }}
 {{- printf "%s-collector" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- define "skopos.checkpoint.fullname" -}}
+{{- printf "%s-checkpoint" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{- define "skopos.checkpoint.secretName" -}}
+{{- if .Values.checkpoint.s3.existingSecret }}
+{{- .Values.checkpoint.s3.existingSecret }}
+{{- else }}
+{{- printf "%s-checkpoint-s3" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
 {{- define "skopos.obi.fullname" -}}
 {{- printf "%s-obi" (include "skopos.fullname" .) | trunc 63 | trimSuffix "-" }}
 {{- end }}

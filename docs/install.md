@@ -25,6 +25,9 @@ ClickHouse schema, but manages the unit and schema directly.
   observability.
 - Optional tiered storage and backups need S3-compatible endpoints, existing
   buckets, and credentials. See [storage.md](storage.md).
+- The optional durability checkpoint needs an S3-compatible endpoint, an
+  existing bucket, and credentials, plus a PVC for its local WAL. See
+  [checkpoint.md](checkpoint.md).
 
 ## Install the data plane
 
@@ -173,6 +176,13 @@ The important values are:
 | `clickhouse.backup.enabled` | `false` | Optional CronJob that runs `BACKUP DATABASE` to a separate S3 destination. See [storage.md](storage.md). |
 | `clickhouse.backup.schedule` | `0 2 * * *` | Cron schedule for the full backup. |
 | `clickhouse.backup.*` | empty | Backup S3 endpoint, bucket, prefix, and credentials. The destination must not overlap the live cold tier. |
+| `checkpoint.enabled` | `false` | Fan out every OTLP signal to the recent-window durability checkpoint. Requires a bucket and credentials; see [checkpoint.md](checkpoint.md). |
+| `collector.sendingQueue.storageSize` | `1Gi` | `emptyDir` size for the checkpoint exporter's file-backed queue. Survives Collector container restarts, not pod deletion. |
+| `checkpoint.persistence.size` | `2Gi` | Per-replica WAL PVC. Keep it above `checkpoint.maxLocalBytes` plus filesystem reserve. |
+| `checkpoint.sealBytes`, `sealInterval` | `8388608`, `15s` | Seal the active segment on size or age. The unshipped window is bounded by `max(sealBytes, arrival_rate * sealInterval)`. |
+| `checkpoint.maxLocalBytes` | `1073741824` | Local budget; the receiver returns `503` with `Retry-After` above it. |
+| `checkpoint.s3.*` | empty | S3 endpoint, bucket, prefix, region, and credentials (or `existingSecret`) for checkpoint objects. The chart does not create the bucket. |
+| `checkpoint.terminationGracePeriodSeconds` | `40` | Must cover the 10 s HTTP drain plus `flushTimeout`. |
 | `context.enabled` | `false` | Mount a semantic context catalog and serve `/api/v1/context/*`. |
 | `context.observed` | `true` | Read observed metric type/unit/description from ClickHouse for unknown metrics; labeled `known:false` and `observed_only`. |
 | `context.existingConfigMap` | `""` | Existing ConfigMap with a `catalog.json` key. |
@@ -240,6 +250,10 @@ tighten `networkPolicy.gateway.allowFrom` to the ingress controller namespace.
   Backups are separate: they are for disaster recovery and must be restored
   before the gateway can query them. See [storage.md](storage.md) for values,
   existing-install `ALTER` steps, and restore commands.
+- The durability checkpoint is optional and off by default. When enabled, it
+  uses its own per-replica WAL PVC and S3 prefix, independent of the ClickHouse
+  hot and cold volumes. PVC loss loses the unshipped tail; uploaded objects
+  remain in S3. See [checkpoint.md](checkpoint.md).
 
 ## Security notes
 

@@ -19,6 +19,14 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      {{- if .Values.checkpoint.enabled }}
+      # File-backed queue for the checkpoint exporter. The Collector process can
+      # restart without losing queued batches; the checkpoint WAL is the
+      # durable layer.
+      file_storage:
+        directory: /var/lib/otelcol/storage
+        timeout: 10s
+      {{- end }}
 
     exporters:
       clickhouse:
@@ -57,25 +65,66 @@ data:
           max_interval: 30s
           max_elapsed_time: 300s
 
+      {{- if .Values.checkpoint.enabled }}
+      # Fan-out copy for the durability checkpoint. The local write is ACKed by
+      # the checkpoint before this exporter reports success; the file queue
+      # covers a checkpoint restart and the S3 uploader covers a ClickHouse
+      # loss later.
+      otlphttp/checkpoint:
+        endpoint: http://{{ include "skopos.checkpoint.fullname" . }}:{{ .Values.checkpoint.service.port }}
+        compression: gzip
+        encoding: proto
+        timeout: 5s
+        sending_queue:
+          enabled: true
+          storage: file_storage
+          num_consumers: {{ .Values.collector.sendingQueue.numConsumers }}
+          queue_size: {{ .Values.collector.sendingQueue.queueSize }}
+          sizer: items
+          batch:
+            min_size: {{ .Values.collector.sendingQueue.batchMinSize }}
+            flush_timeout: {{ .Values.collector.sendingQueue.batchFlushTimeout }}
+        retry_on_failure:
+          enabled: true
+          initial_interval: 5s
+          max_interval: 30s
+          # Keep retrying: the file-backed queue persists the batch, and the
+          # checkpoint's own WAL is the durability target. Dropping after a
+          # fixed window would silently reopen the gap this path exists to close.
+          max_elapsed_time: 0s
+      {{- end }}
+
     service:
       extensions:
         - health_check
+        {{- if .Values.checkpoint.enabled }}
+        - file_storage
+        {{- end }}
       pipelines:
         traces:
           receivers:
             - otlp
           exporters:
             - clickhouse
+            {{- if .Values.checkpoint.enabled }}
+            - otlphttp/checkpoint
+            {{- end }}
         metrics:
           receivers:
             - otlp
           exporters:
             - clickhouse
+            {{- if .Values.checkpoint.enabled }}
+            - otlphttp/checkpoint
+            {{- end }}
         logs:
           receivers:
             - otlp
           exporters:
             - clickhouse
+            {{- if .Values.checkpoint.enabled }}
+            - otlphttp/checkpoint
+            {{- end }}
       telemetry:
         logs:
           level: info

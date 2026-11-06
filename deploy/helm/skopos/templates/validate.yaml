@@ -1,6 +1,31 @@
 {{- if and .Values.obi.enabled (not .Values.collector.enabled) }}
 {{- fail "obi.enabled=true requires collector.enabled=true" }}
 {{- end }}
+{{- if and .Values.checkpoint.enabled (not .Values.collector.enabled) }}
+{{- fail "checkpoint.enabled=true requires collector.enabled=true" }}
+{{- end }}
+{{- if .Values.checkpoint.enabled }}
+{{- $checkpoint := .Values.checkpoint }}
+{{- $s3 := $checkpoint.s3 }}
+{{- if or (not $s3.endpoint) (not $s3.bucket) (not $s3.prefix) }}
+{{- fail "checkpoint.enabled=true requires checkpoint.s3.endpoint, .bucket, and .prefix" }}
+{{- end }}
+{{- if and $s3.existingSecret (or $s3.accessKeyId $s3.secretAccessKey) }}
+{{- fail "set either checkpoint.s3.existingSecret or inline accessKeyId/secretAccessKey, not both" }}
+{{- end }}
+{{- if and $s3.existingSecret $s3.sessionToken }}
+{{- fail "set either checkpoint.s3.existingSecret or inline sessionToken, not both" }}
+{{- end }}
+{{- if and $s3.sessionToken (not $s3.accessKeyId) }}
+{{- fail "checkpoint.s3.sessionToken requires inline accessKeyId and secretAccessKey" }}
+{{- end }}
+{{- if or (and (not $s3.accessKeyId) $s3.secretAccessKey) (and $s3.accessKeyId (not $s3.secretAccessKey)) }}
+{{- fail "checkpoint.s3.accessKeyId and checkpoint.s3.secretAccessKey must be set together" }}
+{{- end }}
+{{- if gt (int64 $checkpoint.sealBytes) (int64 $checkpoint.maxLocalBytes) }}
+{{- fail "checkpoint.sealBytes must not exceed checkpoint.maxLocalBytes" }}
+{{- end }}
+{{- end }}
 {{- if and .Values.distributed.enabled (not .Values.gateway.enabled) }}
 {{- fail "distributed.enabled=true requires gateway.enabled=true" }}
 {{- end }}

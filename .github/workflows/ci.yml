@@ -227,6 +227,30 @@ jobs:
           grep -q 'kind: CronJob' /tmp/skopos-storage.yaml
           test "$(grep -c 'TO VOLUME' /tmp/skopos-storage.yaml)" -eq 8
           grep -q 'storage_policy = .tiered.' /tmp/skopos-storage.yaml
+      - name: Render durability checkpoint
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --set checkpoint.enabled=true \
+            --set checkpoint.s3.endpoint=http://rustfs:9000 \
+            --set checkpoint.s3.bucket=skopos-checkpoint \
+            --set checkpoint.s3.accessKeyId=fake \
+            --set checkpoint.s3.secretAccessKey=fake \
+            > /tmp/skopos-checkpoint.yaml
+          grep -q 'name: skopos-checkpoint' /tmp/skopos-checkpoint.yaml
+          grep -q 'kind: StatefulSet' /tmp/skopos-checkpoint.yaml
+          grep -q 'otlphttp/checkpoint' /tmp/skopos-checkpoint.yaml
+          grep -q 'storage: file_storage' /tmp/skopos-checkpoint.yaml
+          grep -q 'SKOPOS_CHECKPOINT_S3_ENDPOINT' /tmp/skopos-checkpoint.yaml
+      - name: Reject incomplete checkpoint S3 configuration
+        run: |
+          if helm template skopos deploy/helm/skopos --namespace observability \
+            --set checkpoint.enabled=true \
+            --set checkpoint.s3.endpoint=http://rustfs:9000 \
+            > /tmp/skopos-checkpoint-invalid.yaml 2> /tmp/skopos-checkpoint-invalid.err; then
+            echo "expected checkpoint without a bucket to fail" >&2
+            exit 1
+          fi
+          grep -q 'requires checkpoint.s3.endpoint, .bucket, and .prefix' /tmp/skopos-checkpoint-invalid.err
 
   policy:
     name: Workflow policy

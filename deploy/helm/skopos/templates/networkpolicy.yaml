@@ -87,6 +87,30 @@ spec:
     {{- end }}
 ---
 {{- end }}
+{{- if .Values.checkpoint.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "skopos.checkpoint.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: checkpoint
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "checkpoint") | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "skopos.componentLabels" (dict "root" . "component" "collector") | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.checkpoint.service.port }}
+---
+{{- end }}
 {{- if .Values.gateway.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

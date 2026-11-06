@@ -1,0 +1,154 @@
+{{- if .Values.checkpoint.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "skopos.checkpoint.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: checkpoint
+spec:
+  serviceName: {{ include "skopos.checkpoint.fullname" . }}
+  replicas: {{ .Values.checkpoint.replicas }}
+  podManagementPolicy: Parallel
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "skopos.componentLabels" (dict "root" . "component" "checkpoint") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "skopos.labels" . | nindent 8 }}
+        app.kubernetes.io/component: checkpoint
+      {{- if or (and (not .Values.checkpoint.s3.existingSecret) (or .Values.checkpoint.s3.accessKeyId .Values.checkpoint.s3.secretAccessKey)) .Values.checkpoint.podAnnotations }}
+      annotations:
+        {{- if and (not .Values.checkpoint.s3.existingSecret) (or .Values.checkpoint.s3.accessKeyId .Values.checkpoint.s3.secretAccessKey) }}
+        checksum/s3-secret: {{ include (print $.Template.BasePath "/checkpoint-s3-secrets.yaml") . | sha256sum | quote }}
+        {{- end }}
+        {{- with .Values.checkpoint.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- end }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.checkpoint.podSecurityContext | nindent 8 }}
+      terminationGracePeriodSeconds: {{ .Values.checkpoint.terminationGracePeriodSeconds }}
+      {{- with .Values.checkpoint.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.checkpoint.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.checkpoint.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: checkpoint
+          # The Skopos image entrypoint is /gateway; run the checkpoint binary.
+          image: {{ include "skopos.image" (dict "image" .Values.gateway.image) | quote }}
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          command:
+            - /skopos-checkpoint
+          args:
+            - serve
+          securityContext:
+            {{- toYaml .Values.checkpoint.securityContext | nindent 12 }}
+          ports:
+            - name: otlp-http
+              containerPort: {{ .Values.checkpoint.service.port }}
+              protocol: TCP
+          env:
+            - name: SKOPOS_CHECKPOINT_LISTEN_ADDR
+              value: ":{{ .Values.checkpoint.service.port }}"
+            - name: SKOPOS_CHECKPOINT_DIR
+              value: /var/lib/skopos/checkpoint
+            - name: SKOPOS_CHECKPOINT_SEAL_BYTES
+              value: {{ .Values.checkpoint.sealBytes | int64 | quote }}
+            - name: SKOPOS_CHECKPOINT_SEAL_INTERVAL
+              value: {{ .Values.checkpoint.sealInterval | quote }}
+            - name: SKOPOS_CHECKPOINT_MAX_LOCAL_BYTES
+              value: {{ .Values.checkpoint.maxLocalBytes | int64 | quote }}
+            - name: SKOPOS_CHECKPOINT_MAX_REQUEST_BYTES
+              value: {{ .Values.checkpoint.maxRequestBytes | int64 | quote }}
+            - name: SKOPOS_CHECKPOINT_FLUSH_TIMEOUT
+              value: {{ .Values.checkpoint.flushTimeout | quote }}
+            - name: SKOPOS_CHECKPOINT_LOG_LEVEL
+              value: {{ .Values.checkpoint.logLevel | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_ENDPOINT
+              value: {{ .Values.checkpoint.s3.endpoint | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_REGION
+              value: {{ .Values.checkpoint.s3.region | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_BUCKET
+              value: {{ .Values.checkpoint.s3.bucket | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_PREFIX
+              value: {{ .Values.checkpoint.s3.prefix | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_VIRTUAL_HOST
+              value: {{ .Values.checkpoint.s3.virtualHost | quote }}
+            - name: SKOPOS_CHECKPOINT_S3_TIMEOUT
+              value: {{ .Values.checkpoint.s3.timeout | quote }}
+            {{- if or .Values.checkpoint.s3.existingSecret .Values.checkpoint.s3.accessKeyId }}
+            - name: SKOPOS_CHECKPOINT_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.checkpoint.secretName" . }}
+                  key: access-key-id
+            - name: SKOPOS_CHECKPOINT_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.checkpoint.secretName" . }}
+                  key: secret-access-key
+            {{- if or .Values.checkpoint.s3.sessionToken .Values.checkpoint.s3.existingSecret }}
+            - name: SKOPOS_CHECKPOINT_S3_SESSION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "skopos.checkpoint.secretName" . }}
+                  key: session-token
+                  optional: true
+            {{- end }}
+            {{- end }}
+            # Replay is run from this pod with the same environment. Serve mode
+            # ignores it; replay mode requires it.
+            - name: SKOPOS_CHECKPOINT_FORWARD_URL
+              value: "http://{{ include "skopos.collector.fullname" . }}:{{ .Values.collector.service.httpPort }}"
+            {{- with .Values.checkpoint.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: otlp-http
+            {{- toYaml .Values.checkpoint.probes.liveness | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: otlp-http
+            {{- toYaml .Values.checkpoint.probes.readiness | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: otlp-http
+            {{- toYaml .Values.checkpoint.probes.startup | nindent 12 }}
+          resources:
+            {{- toYaml .Values.checkpoint.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/skopos/checkpoint
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "skopos.labels" . | nindent 10 }}
+          app.kubernetes.io/component: checkpoint
+      spec:
+        accessModes:
+          {{- toYaml .Values.checkpoint.persistence.accessModes | nindent 10 }}
+        {{- if .Values.checkpoint.persistence.storageClass }}
+        storageClassName: {{ .Values.checkpoint.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.checkpoint.persistence.size }}
+{{- end }}
