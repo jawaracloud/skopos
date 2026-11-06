@@ -1,0 +1,19 @@
+{{- if .Values.checkpoint.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "skopos.checkpoint.fullname" . }}
+  labels:
+    {{- include "skopos.labels" . | nindent 4 }}
+    app.kubernetes.io/component: checkpoint
+spec:
+  type: {{ .Values.checkpoint.service.type }}
+  selector:
+    {{- include "skopos.componentLabels" (dict "root" . "component" "checkpoint") | nindent 4 }}
+  ports:
+    - name: otlp-http
+      port: {{ .Values.checkpoint.service.port }}
+      targetPort: otlp-http
+      protocol: TCP
+      appProtocol: http
+{{- end }}

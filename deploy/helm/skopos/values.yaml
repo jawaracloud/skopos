@@ -162,6 +162,11 @@ collector:
     queueSize: 50000
     batchMinSize: 5000
     batchFlushTimeout: 5s
+    # File-backed queue for the checkpoint exporter, mounted as an emptyDir.
+    # It survives Collector container restarts but not pod deletion. The
+    # checkpoint WAL is the durable layer; this queue only covers a checkpoint
+    # or S3 outage. Used only when checkpoint.enabled=true.
+    storageSize: 1Gi
   resources:
     requests:
       cpu: 100m
@@ -181,6 +186,103 @@ collector:
     capabilities:
       drop:
         - ALL
+  extraEnv: []
+
+# Optional recent-window durability checkpoint. When enabled, the Collector
+# fans every OTLP signal out to this service in addition to ClickHouse. The
+# service ACKs after a local WAL write, seals and gzip-uploads segments to S3,
+# and can replay them through the Collector after ClickHouse loss. It is not a
+# backup, a data lake, or a query path; see docs/checkpoint.md.
+checkpoint:
+  enabled: false
+  # Reuses gateway.image: the Skopos image contains both /gateway and
+  # /skopos-checkpoint. Pin gateway.image.digest for release installs.
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 4319
+  # Local WAL volume. Keep this larger than maxLocalBytes plus filesystem
+  # reserve. The StatefulSet gives each replica its own ReadWriteOnce volume,
+  # so replicas never share an active WAL.
+  persistence:
+    size: 2Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  # Seal the active segment after this many payload bytes or this interval,
+  # whichever comes first. The unshipped window is bounded by
+  # max(sealBytes, arrival_rate * sealInterval); see docs/checkpoint.md.
+  sealBytes: 8388608
+  sealInterval: 15s
+  maxLocalBytes: 1073741824
+  maxRequestBytes: 16777216
+  flushTimeout: 15s
+  logLevel: info
+  s3:
+    # Scheme and host only, for example http://rustfs.observability:9000.
+    # The bucket must already exist; the chart does not create it.
+    endpoint: ""
+    bucket: ""
+    # Set an S3 lifecycle expiration on this prefix as a backstop for objects
+    # that are never replayed; keep it longer than the replay horizon.
+    prefix: "skopos/checkpoint"
+    region: "us-east-1"
+    # Preferred: existing Secret with keys access-key-id and secret-access-key
+    # and an optional session-token. Inline credentials are rendered into a
+    # Secret, never into the StatefulSet. Leave both empty for an unsigned
+    # S3-compatible endpoint.
+    existingSecret: ""
+    accessKeyId: ""
+    secretAccessKey: ""
+    sessionToken: ""
+    # false uses path-style addressing (MinIO/RustFS default).
+    virtualHost: false
+    timeout: 60s
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop:
+        - ALL
+  probes:
+    liveness:
+      initialDelaySeconds: 5
+      periodSeconds: 10
+      timeoutSeconds: 2
+      failureThreshold: 3
+    readiness:
+      initialDelaySeconds: 2
+      periodSeconds: 5
+      timeoutSeconds: 2
+      failureThreshold: 6
+    # WAL recovery can take longer than a liveness window on a large volume.
+    startup:
+      initialDelaySeconds: 1
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 60
+  # Shutdown budget is the 10 s HTTP drain plus flushTimeout. Keep this above
+  # that sum so Kubernetes does not kill the final upload.
+  terminationGracePeriodSeconds: 40
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
   extraEnv: []
 
 obi:

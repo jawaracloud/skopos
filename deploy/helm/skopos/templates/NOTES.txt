@@ -14,7 +14,24 @@ Check the data plane:
 If the init job failed:
 
   kubectl -n {{ .Release.Namespace }} logs job/{{ include "skopos.clickhouseInit.fullname" . }}
+{{- if .Values.checkpoint.enabled }}
 
+Durability checkpoint:
+
+  The Collector fans out every signal to
+  svc/{{ include "skopos.checkpoint.fullname" . }}:{{ .Values.checkpoint.service.port }}.
+  Sealed segments are uploaded to
+  s3://{{ .Values.checkpoint.s3.bucket }}/{{ trimAll "/" .Values.checkpoint.s3.prefix }}/.
+  Configure an S3 lifecycle expiration on that prefix longer than your replay
+  horizon; the checkpoint deletes objects after a successful replay.
+
+  Replay after ClickHouse loss (at-least-once; run one replay at a time):
+
+    kubectl -n {{ .Release.Namespace }} exec -it {{ include "skopos.checkpoint.fullname" . }}-0 -- /skopos-checkpoint replay
+
+  Add -delete to remove each object after its records are accepted. See
+  docs/checkpoint.md for loss bounds and S3 permissions.
+{{- end }}
 Security warning: v0.1 has no built-in authentication. Keep the gateway on a
 ClusterIP Service, restrict the NetworkPolicy to your Grafana namespace, and do
 not expose it to the internet. See SECURITY.md and docs/install.md.

@@ -72,10 +72,19 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            {{- if .Values.checkpoint.enabled }}
+            - name: queue
+              mountPath: /var/lib/otelcol/storage
+            {{- end }}
       volumes:
         - name: config
           configMap:
             name: {{ include "skopos.collector.fullname" . }}-config
         - name: tmp
           emptyDir: {}
+        {{- if .Values.checkpoint.enabled }}
+        - name: queue
+          emptyDir:
+            sizeLimit: {{ .Values.collector.sendingQueue.storageSize }}
+        {{- end }}
 {{- end }}

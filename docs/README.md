@@ -32,7 +32,7 @@ budgets, and MCP tools.
 | [Running as systemd](systemd.md) | Single process or frontend/query split without Kubernetes |
 | [Helm chart distribution](chart-repository.md) | OCI chart install, chart versioning, signature verification |
 | [Tiered storage and backups](storage.md) | Hot/cold S3 storage, TTL, `BACKUP`/`RESTORE`, RustFS test |
-| [Durability checkpoint](checkpoint.md) | Recent-window WAL, segment/gzip upload, loss bounds, replay, configuration |
+| [Durability checkpoint](checkpoint.md) | Recent-window WAL, segment/gzip upload, loss bounds, replay, `checkpoint.*` Helm values |
 | [Release process](release.md) | Tag-only image/OCI chart release, SBOM, keyless signing, attestations, immutable releases |
 
 ## Security

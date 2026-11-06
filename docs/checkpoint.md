@@ -18,7 +18,7 @@ AWS SDK, MinIO client, or compression module is linked.
 | Failure | What protects the data |
 | --- | --- |
 | Checkpoint process crash or restart | `active.wal` is recovered and sealed on open; sealed segments remain until uploaded. |
-| Collector or checkpoint pod restart | The collector's persistent send queue and the checkpoint's local WAL both survive a process restart. |
+| Collector or checkpoint pod restart | The checkpoint's PVC and WAL survive pod rescheduling. The Collector's file-backed queue survives a container restart; it is an `emptyDir`, so a deleted Collector pod loses queued batches. |
 | ClickHouse committed data, then lost it | Objects in S3 are replayed through the Collector into ClickHouse. |
 | S3 outage | Segments accumulate locally up to `MaxLocalBytes`; the receiver returns `503` with `Retry-After` instead of dropping. |
 | Node loss before an upload | Segments already PUT to S3 are safe. The unsealed or unuploaded tail can be lost. A persistent volume preserves the WAL across pod rescheduling, but it does not replace the S3 PUT as the crash-consistency point. |
@@ -232,14 +232,60 @@ checkpoint itself applies backpressure. Keep both: they fail at different
 points. Monitor `otelcol_exporter_send_failed_*` for the checkpoint exporter
 and the `upload_failures` field from `/stats`.
 
-Size the local volume above `MaxLocalBytes` plus the filesystem reserve. A
-persistent volume preserves the WAL across pod restarts and rescheduling. If
-the directory is an `emptyDir`, a pod restart loses the unshipped window by
-design.
+Size the checkpoint's local volume above `MaxLocalBytes` plus the filesystem
+reserve. A persistent volume preserves its WAL across pod restarts and
+rescheduling. If the checkpoint directory is an `emptyDir`, a pod restart loses
+the unshipped window by design. The Collector's file queue is a separate
+buffer; the chart uses an `emptyDir` for it and a PVC for the checkpoint.
 
-Set an S3 lifecycle rule as a backstop for abandoned objects, but keep it longer
-than the expected replay horizon. The service deletes objects itself after a
-successful replay; lifecycle is only for objects nobody replayed.
+### Helm wiring
+
+The chart renders the exporter, the `file_storage` extension, and the queue
+volume above when `checkpoint.enabled=true`. It does not create the S3 bucket.
+The Collector queue is an `emptyDir`: it survives a Collector container restart
+but not pod deletion. The checkpoint's PVC and WAL are the durable layer.
+
+```yaml
+checkpoint:
+  enabled: true
+  persistence:
+    size: 2Gi
+    storageClass: standard
+  s3:
+    endpoint: http://rustfs.observability:9000
+    bucket: skopos-checkpoint
+    prefix: skopos/checkpoint
+    region: us-east-1
+    existingSecret: skopos-checkpoint-s3
+```
+
+`checkpoint.s3.existingSecret` must contain `access-key-id` and
+`secret-access-key`, and may contain `session-token`. Inline credentials are
+rendered into a Secret, never into the StatefulSet. Leave both empty only for a
+public bucket or a test double that accepts unsigned requests.
+
+The checkpoint is a StatefulSet so each replica has its own `ReadWriteOnce`
+WAL volume. Ingest is load-balanced by the Service, and the per-process nonce
+keeps segment names unique when replicas share an S3 prefix. Size the volume
+above `maxLocalBytes` plus filesystem reserve; the defaults pair a 1 GiB local
+budget with a 2 GiB volume. Keep `resources.limits.memory` above `sealBytes`
+plus headroom, because the uploader buffers a segment and its gzip output in
+memory.
+
+Scaling down leaves the removed replica's PVC behind, and its unuploaded tail
+is not processed by another replica. Drain or accept the loss window before
+scaling down.
+
+The chart sets `terminationGracePeriodSeconds` to 40 s, which covers the 10 s
+HTTP drain plus the 15 s final flush. Raise it if you raise `flushTimeout`.
+
+### Object lifecycle
+
+The service deletes an object after a successful `replay -delete`. Set an S3
+lifecycle expiration as a backstop for objects that are never replayed. Keep it
+longer than the expected recovery horizon (for example, 30 days). The chart
+does not create lifecycle rules: the checkpoint policy is scoped to object
+operations on its prefix, not bucket administration.
 
 ## Replay
 
@@ -255,6 +301,17 @@ Objects are listed lexicographically (date, then segment time), decompressed,
 and posted record by record as `application/x-protobuf`. Use `replay -delete`
 to remove each object after every record in it receives a 2xx response. Run one
 replay at a time for a given prefix.
+
+In a chart install, run replay from a checkpoint pod so the
+`SKOPOS_CHECKPOINT_*` environment is already present:
+
+```sh
+kubectl -n observability exec -it skopos-checkpoint-0 -- \
+  /skopos-checkpoint replay
+```
+
+Add `-delete` to the command to remove each object after its records are
+accepted.
 
 Replay is **at-least-once**. A crash between two POSTs, or after the Collector
 accepts the last POST but before the S3 delete, replays some records twice.
@@ -308,5 +365,5 @@ round-trips, corruption, torn tails, backpressure, local recovery, and replay.
 - **No partial-success inspection.** A 2xx means the Collector accepted the
   request; per-record partial success is surfaced by the Collector, not here.
 
-The Collector fan-out exporter, Helm wiring, and the ClickHouse replay-dedup
-schema change are separate implementation phases.
+The Collector fan-out exporter and Helm wiring are implemented. The ClickHouse
+replay-deduplication schema change is a separate implementation phase.
