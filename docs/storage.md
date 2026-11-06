@@ -27,6 +27,10 @@ TTL/delete behavior and does not require any S3 credentials.
   separate compactor and does not rewrite S3 objects behind ClickHouse's back.
   ClickHouse merges parts on the S3 disk using its own background merge
   scheduler.
+- **The cold tier and backups are not the durability checkpoint.** The
+  checkpoint described in [checkpoint.md](checkpoint.md) is a separate recent
+  window of raw OTLP payloads for replay after ClickHouse loss; the gateway
+  never queries it.
 
 ## Tiered storage
 

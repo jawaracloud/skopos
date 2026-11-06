@@ -8,13 +8,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -mod=vendor \
     -trimpath \
     -ldflags "-s -w -X main.version=${VERSION}" \
-    -o /out/gateway ./cmd/gateway
+    -o /out/gateway ./cmd/gateway && \
+    CGO_ENABLED=0 GOOS=linux go build \
+    -mod=vendor \
+    -trimpath \
+    -ldflags "-s -w -X main.version=${VERSION}" \
+    -o /out/skopos-checkpoint ./cmd/skopos-checkpoint
 
 FROM scratch
 
 COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /out/gateway /gateway
+COPY --from=build /out/skopos-checkpoint /skopos-checkpoint
 
 USER 65532:65532
-EXPOSE 8080
+EXPOSE 8080 4319
 ENTRYPOINT ["/gateway"]
