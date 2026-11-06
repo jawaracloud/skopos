@@ -106,23 +106,23 @@ func runQueries(cfg config.Config, logger *slog.Logger, basicAuth *auth.Basic) e
 	defer client.Close()
 
 	schema := plan.DefaultSchema(cfg.ClickHouseDatabase, cfg.Tables)
-	fetcher, err := prom.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	fetcher, err := prom.NewClickHouseFetcher(client, schema, cfg.Tables, cfg.MaxScanRows)
 	if err != nil {
 		return fmt.Errorf("prometheus storage: %w", err)
 	}
 	promEngine := prom.NewEngine(fetcher)
-	promEngine.MaxSamples = int(cfg.MaxScanRows)
+	promEngine.MaxSamples = cfg.MaxScanRows
 	promAPI := prom.NewAPI(promEngine, fetcher, version)
 	promAPI.MaxRange = cfg.MaxQueryRange
 
-	tempoFetcher, err := tempo.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	tempoFetcher, err := tempo.NewClickHouseFetcher(client, schema, cfg.Tables, cfg.MaxScanRows)
 	if err != nil {
 		return fmt.Errorf("tempo storage: %w", err)
 	}
 	tempoAPI := tempo.NewAPI(tempoFetcher, version)
 	tempoAPI.MaxRange = cfg.MaxQueryRange
 
-	lokiFetcher, err := loki.NewClickHouseFetcher(client, schema, cfg.Tables, int(cfg.MaxScanRows))
+	lokiFetcher, err := loki.NewClickHouseFetcher(client, schema, cfg.Tables, cfg.MaxScanRows)
 	if err != nil {
 		return fmt.Errorf("loki storage: %w", err)
 	}
