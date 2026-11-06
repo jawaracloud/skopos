@@ -48,7 +48,7 @@ type Config struct {
 	MaxMemoryUsage     uint64
 	MaxRowsToRead      uint64
 	MaxResultRows      uint64
-	MaxScanRows        uint64
+	MaxScanRows        int
 	MaxQueryRange      time.Duration
 	MaxResponseBytes   int64
 	ReadinessTimeout   time.Duration
@@ -147,7 +147,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 	if cfg.MaxResultRows, err = uintEnv(lookup, "SKOPOS_CLICKHOUSE_MAX_RESULT_ROWS", cfg.MaxResultRows); err != nil {
 		return Config{}, err
 	}
-	if cfg.MaxScanRows, err = uintEnv(lookup, "SKOPOS_MAX_SCAN_ROWS", cfg.MaxScanRows); err != nil {
+	if cfg.MaxScanRows, err = intValueEnv(lookup, "SKOPOS_MAX_SCAN_ROWS", cfg.MaxScanRows); err != nil {
 		return Config{}, err
 	}
 	if cfg.MaxQueryRange, err = durationEnv(lookup, "SKOPOS_MAX_QUERY_RANGE", cfg.MaxQueryRange); err != nil {
@@ -229,7 +229,7 @@ func FromLookup(lookup func(string) (string, bool)) (Config, error) {
 		return Config{}, fmt.Errorf("SKOPOS_AUTH_ENABLED requires SKOPOS_AUTH_USERNAME and SKOPOS_AUTH_PASSWORD")
 	}
 	if cfg.MaxMemoryUsage == 0 || cfg.MaxRowsToRead == 0 || cfg.MaxResultRows == 0 ||
-		cfg.MaxScanRows == 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
+		cfg.MaxScanRows <= 0 || cfg.MaxResponseBytes <= 0 || cfg.MaxRequestBytes <= 0 {
 		return Config{}, fmt.Errorf("SKOPOS limits must be positive")
 	}
 	if cfg.MaxQueryRange <= 0 {
@@ -322,6 +322,20 @@ func uintEnv(lookup func(string) (string, bool), key string, fallback uint64) (u
 		return fallback, nil
 	}
 	n, err := strconv.ParseUint(v, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", key, err)
+	}
+	return n, nil
+}
+
+// intValueEnv parses an environment value that must fit in int. It avoids an
+// unchecked uint64-to-int conversion at the call sites.
+func intValueEnv(lookup func(string) (string, bool), key string, fallback int) (int, error) {
+	v, ok := lookup(key)
+	if !ok {
+		return fallback, nil
+	}
+	n, err := strconv.Atoi(v)
 	if err != nil {
 		return 0, fmt.Errorf("%s: %w", key, err)
 	}
