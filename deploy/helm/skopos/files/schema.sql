@@ -2,8 +2,10 @@
 -- opentelemetry-collector-contrib v0.164.0.
 --
 -- The exporter is configured with create_schema: false. This job owns DDL.
--- Columns and types match the pinned exporter; indexes and TTL are customized
--- as permitted by the exporter's schema-management documentation.
+-- Columns and types match the pinned exporter; indexes, TTL, the
+-- ReplacingMergeTree engine, and the replay-dedup sort keys are customized.
+-- Logs and metrics add a materialized _skopos_row_hash so a replayed OTLP
+-- record maps to the same ClickHouse row.
 -- ClickHouse 26.8 is tested; the logs table uses full-text indexes that
 -- require ClickHouse 26.2+.
 
@@ -42,9 +44,12 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_span_attr_key mapKeys(SpanAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_span_attr_value mapValues(SpanAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_duration Duration TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(Timestamp)
-ORDER BY (ServiceName, SpanName, toDateTime(Timestamp))
+-- (TraceId, SpanId) is the OTel span identity. Replay re-sends the original
+-- payload, so a replayed span has the same key and is collapsed by FINAL or a
+-- background merge.
+ORDER BY (ServiceName, SpanName, toDateTime(Timestamp), TraceId, SpanId)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -58,9 +63,9 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     Start DateTime CODEC(Delta, ZSTD(1)),
     End DateTime CODEC(Delta, ZSTD(1)),
     INDEX idx_trace_id TraceId TYPE bloom_filter(0.01) GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(Start)
-ORDER BY (TraceId, Start)
+ORDER BY (TraceId, Start, End)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(Start) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(Start) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -104,6 +109,27 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     `__otel_materialized_k8s.pod.name` LowCardinality(String) MATERIALIZED ResourceAttributes['k8s.pod.name'] CODEC(ZSTD(1)),
     `__otel_materialized_k8s.pod.uid` LowCardinality(String) MATERIALIZED ResourceAttributes['k8s.pod.uid'] CODEC(ZSTD(1)),
     `__otel_materialized_deployment.environment.name` LowCardinality(String) MATERIALIZED ResourceAttributes['deployment.environment.name'] CODEC(ZSTD(1)),
+    -- Logs have no OTel record id. Hash the whole row (with mapSort so
+    -- attribute order is irrelevant) to give replayed records a stable key.
+    -- Two byte-identical log records are indistinguishable and collapse.
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        Timestamp,
+        TraceId,
+        SpanId,
+        TraceFlags,
+        SeverityText,
+        SeverityNumber,
+        ServiceName,
+        Body,
+        ResourceSchemaUrl,
+        mapSort(ResourceAttributes),
+        ScopeSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        mapSort(LogAttributes),
+        EventName
+    ),
     INDEX idx_trace_id TraceId TYPE text(tokenizer = 'array'),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE text(tokenizer = 'array'),
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE text(tokenizer = 'array'),
@@ -116,9 +142,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_body Body TYPE text(tokenizer = 'splitByNonAlpha'),
     INDEX idx_lower_body lower(Body) TYPE text(tokenizer = 'splitByNonAlpha'),
     INDEX idx_event_name EventName TYPE bloom_filter(0.01) GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(Timestamp)
-ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)
+-- The hash is the final key component so replaying the same OTLP record is
+-- collapsed by FINAL or a background merge.
+ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(Timestamp) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -151,6 +179,29 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
         SpanId String,
         TraceId String
     ) CODEC(ZSTD(1)),
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        mapSort(ResourceAttributes),
+        ResourceSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        ScopeDroppedAttrCount,
+        ScopeSchemaUrl,
+        ServiceName,
+        MetricName,
+        MetricDescription,
+        MetricUnit,
+        mapSort(Attributes),
+        StartTimeUnix,
+        TimeUnix,
+        Value,
+        Flags,
+        arrayMap(m -> mapSort(m), Exemplars.FilteredAttributes),
+        Exemplars.TimeUnix,
+        Exemplars.Value,
+        Exemplars.SpanId,
+        Exemplars.TraceId
+    ),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scope_attr_key mapKeys(ScopeAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -158,9 +209,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_time_minmax TimeUnix TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(TimeUnix)
-ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+-- The row hash gives replay a stable final key component. The attribute hash
+-- is mapSort'ed so attribute insertion order cannot split a duplicate.
+ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(mapSort(Attributes)), TimeUnix, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -195,6 +248,31 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     ) CODEC(ZSTD(1)),
     AggregationTemporality Int32 CODEC(ZSTD(1)),
     IsMonotonic Boolean CODEC(Delta, ZSTD(1)),
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        mapSort(ResourceAttributes),
+        ResourceSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        ScopeDroppedAttrCount,
+        ScopeSchemaUrl,
+        ServiceName,
+        MetricName,
+        MetricDescription,
+        MetricUnit,
+        mapSort(Attributes),
+        StartTimeUnix,
+        TimeUnix,
+        Value,
+        Flags,
+        AggregationTemporality,
+        IsMonotonic,
+        arrayMap(m -> mapSort(m), Exemplars.FilteredAttributes),
+        Exemplars.TimeUnix,
+        Exemplars.Value,
+        Exemplars.SpanId,
+        Exemplars.TraceId
+    ),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scope_attr_key mapKeys(ScopeAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -202,9 +280,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_time_minmax TimeUnix TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(TimeUnix)
-ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+-- The row hash gives replay a stable final key component. The attribute hash
+-- is mapSort'ed so attribute insertion order cannot split a duplicate.
+ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(mapSort(Attributes)), TimeUnix, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -243,6 +323,35 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     Min Float64 CODEC(ZSTD(1)),
     Max Float64 CODEC(ZSTD(1)),
     AggregationTemporality Int32 CODEC(ZSTD(1)),
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        mapSort(ResourceAttributes),
+        ResourceSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        ScopeDroppedAttrCount,
+        ScopeSchemaUrl,
+        ServiceName,
+        MetricName,
+        MetricDescription,
+        MetricUnit,
+        mapSort(Attributes),
+        StartTimeUnix,
+        TimeUnix,
+        Count,
+        Sum,
+        BucketCounts,
+        ExplicitBounds,
+        Flags,
+        Min,
+        Max,
+        AggregationTemporality,
+        arrayMap(m -> mapSort(m), Exemplars.FilteredAttributes),
+        Exemplars.TimeUnix,
+        Exemplars.Value,
+        Exemplars.SpanId,
+        Exemplars.TraceId
+    ),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scope_attr_key mapKeys(ScopeAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -250,9 +359,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_time_minmax TimeUnix TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(TimeUnix)
-ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+-- The row hash gives replay a stable final key component. The attribute hash
+-- is mapSort'ed so attribute insertion order cannot split a duplicate.
+ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(mapSort(Attributes)), TimeUnix, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -295,6 +406,39 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     Min Float64 CODEC(ZSTD(1)),
     Max Float64 CODEC(ZSTD(1)),
     AggregationTemporality Int32 CODEC(ZSTD(1)),
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        mapSort(ResourceAttributes),
+        ResourceSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        ScopeDroppedAttrCount,
+        ScopeSchemaUrl,
+        ServiceName,
+        MetricName,
+        MetricDescription,
+        MetricUnit,
+        mapSort(Attributes),
+        StartTimeUnix,
+        TimeUnix,
+        Count,
+        Sum,
+        Scale,
+        ZeroCount,
+        PositiveOffset,
+        PositiveBucketCounts,
+        NegativeOffset,
+        NegativeBucketCounts,
+        Flags,
+        Min,
+        Max,
+        AggregationTemporality,
+        arrayMap(m -> mapSort(m), Exemplars.FilteredAttributes),
+        Exemplars.TimeUnix,
+        Exemplars.Value,
+        Exemplars.SpanId,
+        Exemplars.TraceId
+    ),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scope_attr_key mapKeys(ScopeAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -302,9 +446,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_time_minmax TimeUnix TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(TimeUnix)
-ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+-- The row hash gives replay a stable final key component. The attribute hash
+-- is mapSort'ed so attribute insertion order cannot split a duplicate.
+ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(mapSort(Attributes)), TimeUnix, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE
@@ -335,6 +481,27 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
         Value Float64
     ) CODEC(ZSTD(1)),
     Flags UInt32 CODEC(ZSTD(1)),
+    `_skopos_row_hash` FixedString(16) MATERIALIZED sipHash128(
+        mapSort(ResourceAttributes),
+        ResourceSchemaUrl,
+        ScopeName,
+        ScopeVersion,
+        mapSort(ScopeAttributes),
+        ScopeDroppedAttrCount,
+        ScopeSchemaUrl,
+        ServiceName,
+        MetricName,
+        MetricDescription,
+        MetricUnit,
+        mapSort(Attributes),
+        StartTimeUnix,
+        TimeUnix,
+        Count,
+        Sum,
+        Flags,
+        ValueAtQuantiles.Quantile,
+        ValueAtQuantiles.Value
+    ),
     INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_scope_attr_key mapKeys(ScopeAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
@@ -342,9 +509,11 @@ CREATE TABLE IF NOT EXISTS `{{ .Values.clickhouse.database }}`.`{{ .Values.click
     INDEX idx_attr_key mapKeys(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_attr_value mapValues(Attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_time_minmax TimeUnix TYPE minmax GRANULARITY 1
-) ENGINE = MergeTree()
+) ENGINE = ReplacingMergeTree()
 PARTITION BY toDate(TimeUnix)
-ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(Attributes), TimeUnix)
+-- The row hash gives replay a stable final key component. The attribute hash
+-- is mapSort'ed so attribute insertion order cannot split a duplicate.
+ORDER BY (ServiceName, MetricName, toStartOfHour(TimeUnix), cityHash64(mapSort(Attributes)), TimeUnix, _skopos_row_hash)
 {{- if .Values.clickhouse.storage.enabled }}
 TTL toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.hotDays }}) TO VOLUME '{{ .Values.clickhouse.storage.coldVolume }}',
     toDateTime(TimeUnix) + toIntervalDay({{ .Values.clickhouse.storage.totalDays }}) DELETE

@@ -234,7 +234,8 @@ tighten `networkPolicy.gateway.allowFrom` to the ingress controller namespace.
 - TTL is enforced by ClickHouse at the table level. The init job writes the TTL
   from the chart values. Changing TTL on an existing install requires a schema
   migration; the alpha chart's `CREATE TABLE IF NOT EXISTS` does not modify
-  existing tables.
+  existing tables. The replay-dedup engine migration is separate and runs
+  automatically; see [storage.md](storage.md#replay-deduplication).
 - The PVC is a single `ReadWriteOnce` volume. ClickHouse single-node does not
   replicate. A lost PVC loses telemetry.
 - When the disk fills, ClickHouse rejects inserts with errors such as
@@ -275,6 +276,14 @@ tighten `networkPolicy.gateway.allowFrom` to the ingress controller namespace.
 helm upgrade skopos ./deploy/helm/skopos -n observability
 helm uninstall skopos -n observability
 ```
+
+On upgrade the ClickHouse init Job applies the current schema and, when needed,
+migrates the signal tables from `MergeTree` to the replay-dedup
+`ReplacingMergeTree` layout. It renames each old table aside, recreates it, and
+copies the rows back while the new table is already live. Ingest retries during
+the short rename window. Raise `clickhouse.initJob.activeDeadlineSeconds` for
+large tables; a stale `<table>__skopos_pre_dedup` table means the copy was
+interrupted and the next Job resumes it. See [storage.md](storage.md#replay-deduplication).
 
 The ClickHouse PVC is not deleted by `helm uninstall`. Delete it explicitly only
 after confirming you no longer need the data:

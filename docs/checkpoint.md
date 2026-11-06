@@ -313,12 +313,38 @@ kubectl -n observability exec -it skopos-checkpoint-0 -- \
 Add `-delete` to the command to remove each object after its records are
 accepted.
 
-Replay is **at-least-once**. A crash between two POSTs, or after the Collector
-accepts the last POST but before the S3 delete, replays some records twice.
-Deduplication is an explicit follow-up: either an ingest id in ClickHouse or
-`ReplacingMergeTree` keyed by the original signal identity. Any 2xx from the
-Collector is treated as accepted; OTLP partial-success response bodies are not
-inspected.
+Replay is **at-least-once** in transport. A crash between two POSTs, or after
+the Collector accepts the last POST but before the S3 delete, replays some
+records twice. ClickHouse makes the replayed rows idempotent:
+
+- Traces use `ReplacingMergeTree`; the sort key ends with the OTel span
+  identity `(TraceId, SpanId)`.
+- Logs and metrics have no OTel record id. Their tables add a 128-bit
+  materialized `_skopos_row_hash` computed from the whole row with `mapSort`
+  on every attribute map, so attribute insertion order cannot split a
+  duplicate.
+- Every gateway read uses `FINAL`. Duplicates are hidden as soon as the POST
+  returns, not only after ClickHouse's next background merge. If the gateway
+  reaches a pre-migration `MergeTree` table that rejects `FINAL`, it retries
+  the read without it so queries stay available; the init Job converts the
+  table to `ReplacingMergeTree`.
+
+Two byte-identical log or metric records are indistinguishable at the OTLP
+level and collapse to one row. This is the only identity available without an
+ingest id from the SDK. A span is collapsed only when its `(TraceId, SpanId)`
+is replayed; distinct spans keep their identity.
+
+An existing install is migrated by the ClickHouse init Job on upgrade. The Job
+renames each old `MergeTree` table aside, lets `schema.sql` recreate it with the
+dedup engine and key, and copies the old rows back while the new table is
+already live. The Collector retries inserts during the short rename window.
+Re-running the Job is safe. Large tables can take longer than the default
+`clickhouse.initJob.activeDeadlineSeconds` (600 s); raise it for the upgrade. A
+stale `*__skopos_pre_dedup` table means the Job was interrupted, and the next
+run resumes the copy.
+
+Any 2xx from the Collector is treated as accepted; OTLP partial-success response
+bodies are not inspected.
 
 ## Operations
 
@@ -348,13 +374,20 @@ go test -bench=. ./internal/checkpoint
 The SigV4 tests use the AWS GET-object and PUT-object documentation vectors.
 The S3 tests exercise a paginated `ListObjectsV2` double, retries, gzip
 round-trips, corruption, torn tails, backpressure, local recovery, and replay.
+The replay-dedup schema is exercised against a real ClickHouse by:
+
+```sh
+CLICKHOUSE_URL=http://127.0.0.1:8123 sh test/integration/dedup/run.sh
+```
 
 ## Deliberate limits and follow-ups
 
 - **No raw-event lake.** This keeps only a recent durability window. Object
   storage as a permanent source of truth is a different system (queue, worker,
   schema versioning) and is out of scope.
-- **No dedup yet.** Replay is at-least-once; see above.
+- **Replay deduplication is eventual at the storage layer.** `FINAL` hides
+  duplicates on reads, and background merges collapse them on disk. A
+  byte-identical log or metric record is treated as the same record.
 - **No compactor.** ClickHouse owns compaction for its own cold tier; this
   service never rewrites ClickHouse objects.
 - **No zstd.** Gzip is sufficient for a background upload and keeps the package
@@ -365,5 +398,6 @@ round-trips, corruption, torn tails, backpressure, local recovery, and replay.
 - **No partial-success inspection.** A 2xx means the Collector accepted the
   request; per-record partial success is surfaced by the Collector, not here.
 
-The Collector fan-out exporter and Helm wiring are implemented. The ClickHouse
-replay-deduplication schema change is a separate implementation phase.
+The Collector fan-out exporter and Helm wiring are implemented. ClickHouse
+replay deduplication is implemented by the `ReplacingMergeTree` schema and the
+init-Job migration described above.

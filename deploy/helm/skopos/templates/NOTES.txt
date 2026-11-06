@@ -25,7 +25,8 @@ Durability checkpoint:
   Configure an S3 lifecycle expiration on that prefix longer than your replay
   horizon; the checkpoint deletes objects after a successful replay.
 
-  Replay after ClickHouse loss (at-least-once; run one replay at a time):
+  Replay after ClickHouse loss (at-least-once transport, deduplicated on
+  read; run one replay at a time):
 
     kubectl -n {{ .Release.Namespace }} exec -it {{ include "skopos.checkpoint.fullname" . }}-0 -- /skopos-checkpoint replay
 

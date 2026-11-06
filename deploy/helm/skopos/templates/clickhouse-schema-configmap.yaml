@@ -8,3 +8,5 @@ metadata:
 data:
   schema.sql: |
 {{ tpl (.Files.Get "files/schema.sql") . | indent 4 }}
+  migrate.sh: |
+{{ tpl (.Files.Get "files/migrate.sh") . | indent 4 }}

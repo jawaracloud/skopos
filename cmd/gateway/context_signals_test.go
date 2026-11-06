@@ -55,6 +55,9 @@ func TestObservedSignals(t *testing.T) {
 		if !strings.Contains(query, "`otel`") || !strings.Contains(query, "INTERVAL 7 DAY") {
 			t.Fatalf("query = %s", query)
 		}
+		if !strings.Contains(query, " FINAL ") {
+			t.Fatalf("query does not deduplicate replay rows: %s", query)
+		}
 	}
 
 	// Cache is independent for logs and traces.

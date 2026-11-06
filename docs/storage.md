@@ -32,6 +32,38 @@ TTL/delete behavior and does not require any S3 credentials.
   window of raw OTLP payloads for replay after ClickHouse loss; the gateway
   never queries it.
 
+## Replay deduplication
+
+The signal tables use `ReplacingMergeTree` so replaying the checkpoint is
+idempotent in ClickHouse:
+
+- `otel_traces` ends its sort key with the OTel span identity
+  `(TraceId, SpanId)`.
+- `otel_logs` and the metric tables add a 128-bit materialized
+  `_skopos_row_hash` computed from the whole row. Attribute maps are hashed
+  with `mapSort`, so attribute insertion order cannot split a duplicate.
+  `SELECT *` does not include materialized columns, and the Collector's insert
+  does not name them.
+- The gateway reads every signal table with `FINAL`, which applies the
+  `ReplacingMergeTree` key immediately instead of waiting for a background
+  merge. A gateway that reaches a pre-migration `MergeTree` table retries
+  without `FINAL`, so reads remain available until the init Job converts it.
+
+There is no OTel record id for a log or metric point. Two byte-identical rows
+are therefore the same row and collapse to one; distinct rows keep distinct
+hashes.
+
+The ClickHouse init Job runs `schema.sql` and then `migrate.sh`. On a fresh
+install both are no-ops beyond creating the current tables. On an upgrade the
+Job renames each old `MergeTree` table to `<table>__skopos_pre_dedup`, lets
+`schema.sql` recreate it with the dedup engine and key, and copies the old rows
+back. The new table is live before the copy starts. The Collector retries
+inserts during the short rename window, and the Job is safe to re-run after an
+interruption. For a large table, raise
+`clickhouse.initJob.activeDeadlineSeconds` for the upgrade. Stale
+`__skopos_pre_dedup` tables mean the copy did not finish; the next init Job
+resumes it.
+
 ## Tiered storage
 
 ### Values

@@ -68,6 +68,7 @@ budgets, and MCP tools.
 | --- | --- |
 | [ADR 0001](adr/0001-observability-stack.md) | OBI + Collector + ClickHouse + compatible gateway, scope and decisions |
 | [ADR 0002](adr/0002-distributed-read-path.md) | Distributed frontend/query split, S3 retention, full-text, no compactor |
+| [ADR 0003](adr/0003-replay-deduplication.md) | ReplacingMergeTree replay dedup, row hashes, FINAL, online migration |
 | [Dependency policy](dependencies.md) | Go modules, pinned images, reference test containers, supply chain |
 
 ## Security and project process

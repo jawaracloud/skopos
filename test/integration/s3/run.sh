@@ -88,8 +88,8 @@ echo "ok: ClickHouse is ready"
 echo "==> rendering the chart schema with tiered storage enabled"
 "${HELM_BIN}" "${helm_values[@]}" \
   --show-only templates/clickhouse-schema-configmap.yaml \
-  | sed -n '/^  schema.sql: |$/,$p' \
-  | tail -n +2 \
+  | sed -n '/^  schema.sql: |$/,/^  migrate.sh: |$/p' \
+  | sed '1d;$d' \
   | sed 's/^    //' \
   > /tmp/skopos-s3-schema.sql
 

@@ -45,6 +45,51 @@ func newTestClient(t *testing.T, h http.Handler, mutate func(*Config)) *Client {
 	return c
 }
 
+func TestQueryFallsBackWithoutFinalOnMergeTree(t *testing.T) {
+	var calls int32
+	var bodies []string
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		if atomic.AddInt32(&calls, 1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = io.WriteString(w, `{"exception":"Code: 181. DB::Exception: Storage MergeTree doesn't support FINAL. (ILLEGAL_FINAL)"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"meta":[],"data":[],"rows":0}`)
+	}), nil)
+
+	if _, err := c.Query(context.Background(), "SELECT 1 FROM `otel`.`otel_logs` FINAL WHERE 1", nil); err != nil {
+		t.Fatalf("Query: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests = %d, want 2", len(bodies))
+	}
+	if !strings.Contains(bodies[0], " FINAL") {
+		t.Fatalf("first request did not try FINAL: %q", bodies[0])
+	}
+	if strings.Contains(bodies[1], " FINAL") {
+		t.Fatalf("fallback request still has FINAL: %q", bodies[1])
+	}
+}
+
+func TestQueryDoesNotRetryOtherErrors(t *testing.T) {
+	var calls int32
+	c := newTestClient(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = io.WriteString(w, `{"exception":"Code: 60. DB::Exception: Table otel.otel_traces does not exist. (UNKNOWN_TABLE)"}`)
+	}), nil)
+
+	if _, err := c.Query(context.Background(), "SELECT 1 FROM `otel`.`otel_traces` FINAL", nil); err == nil {
+		t.Fatal("expected query error")
+	}
+	if calls != 1 {
+		t.Fatalf("requests = %d, want 1", calls)
+	}
+}
+
 func TestQuerySendsParametersAndParsesJSON(t *testing.T) {
 	start := time.Date(2026, 11, 1, 0, 0, 0, 123456789, time.UTC)
 	end := start.Add(time.Hour)

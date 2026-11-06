@@ -28,6 +28,10 @@ until cli --query "SELECT 1" >/dev/null 2>&1; do
 done
 
 cli --multiquery < /schema/schema.sql
+CLICKHOUSE_HOST=clickhouse \
+CLICKHOUSE_ADMIN_USER="$admin_user" \
+CLICKHOUSE_ADMIN_PASSWORD="$admin_password" \
+  sh /schema/migrate.sh
 
 cli --param_password="$gateway_password" --query "CREATE USER IF NOT EXISTS ${gateway_user} IDENTIFIED WITH sha256_password BY {password:String} SETTINGS readonly = 2, max_execution_time = 30, max_memory_usage = 1073741824, max_rows_to_read = 10000000, max_result_rows = 100000"
 cli --param_password="$gateway_password" --query "ALTER USER ${gateway_user} IDENTIFIED WITH sha256_password BY {password:String} SETTINGS readonly = 2, max_execution_time = 30, max_memory_usage = 1073741824, max_rows_to_read = 10000000, max_result_rows = 100000"
