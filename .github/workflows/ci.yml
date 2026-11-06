@@ -91,6 +91,10 @@ jobs:
         env:
           CLICKHOUSE_URL: http://127.0.0.1:8123
         run: go test -tags=integration ./...
+      - name: Replay dedup schema integration
+        env:
+          CLICKHOUSE_URL: http://127.0.0.1:8123
+        run: sh test/integration/dedup/run.sh
 
   compat:
     name: Tempo and Loki differentials
@@ -227,6 +231,17 @@ jobs:
           grep -q 'kind: CronJob' /tmp/skopos-storage.yaml
           test "$(grep -c 'TO VOLUME' /tmp/skopos-storage.yaml)" -eq 8
           grep -q 'storage_policy = .tiered.' /tmp/skopos-storage.yaml
+      - name: Render replay dedup schema and migration
+        run: |
+          helm template skopos deploy/helm/skopos --namespace observability \
+            --show-only templates/clickhouse-schema-configmap.yaml > /tmp/skopos-schema.yaml
+          test "$(grep -c 'ENGINE = ReplacingMergeTree' /tmp/skopos-schema.yaml)" -eq 8
+          grep -q '_skopos_row_hash' /tmp/skopos-schema.yaml
+          grep -q 'TraceId, SpanId' /tmp/skopos-schema.yaml
+          sed -n '/^  migrate.sh: |$/,$p' /tmp/skopos-schema.yaml \
+            | tail -n +2 | sed 's/^    //' > /tmp/skopos-migrate.sh
+          sh -n /tmp/skopos-migrate.sh
+          grep -q '__skopos_pre_dedup' /tmp/skopos-migrate.sh
       - name: Render durability checkpoint
         run: |
           helm template skopos deploy/helm/skopos --namespace observability \

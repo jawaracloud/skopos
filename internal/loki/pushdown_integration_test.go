@@ -141,7 +141,7 @@ func TestIntegrationPushdownEquivalence(t *testing.T) {
 		"INDEX idx_lower_body lower(Body) TYPE text(tokenizer = 'splitByNonAlpha'), "+
 		"INDEX idx_body Body TYPE text(tokenizer = 'splitByNonAlpha'), "+
 		"INDEX idx_event_name EventName TYPE bloom_filter(0.01) GRANULARITY 1"+
-		") ENGINE = MergeTree PARTITION BY toDate(Timestamp) ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)")
+		") ENGINE = ReplacingMergeTree PARTITION BY toDate(Timestamp) ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp, cityHash64(Body, LogAttributes, ResourceAttributes))")
 
 	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
 	rows := pushdownCorpus(base)

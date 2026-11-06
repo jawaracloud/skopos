@@ -34,6 +34,7 @@ services:
       SKOPOS_GATEWAY_PASSWORD: ${SKOPOS_E2E_GATEWAY_PASSWORD:-skopos-e2e-password}
     volumes:
       - ./.render/schema.sql:/schema/schema.sql:ro
+      - ./.render/migrate.sh:/schema/migrate.sh:ro
       - ./init-clickhouse.sh:/init/init-clickhouse.sh:ro
     restart: "no"
 

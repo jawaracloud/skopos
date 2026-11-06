@@ -7,7 +7,9 @@ set -eu
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 root=$(CDPATH= cd -- "$here/../../.." && pwd)
 src="$root/deploy/helm/skopos/files/schema.sql"
+migrate_src="$root/deploy/helm/skopos/files/migrate.sh"
 out="$here/.render/schema.sql"
+migrate_out="$here/.render/migrate.sh"
 
 mkdir -p "$here/.render"
 
@@ -37,10 +39,22 @@ sed \
       -e 's|{{ .Values.clickhouse.ttl.metricsDays }}|30|g' \
       >"$out"
 
-if grep -q '{{' "$out"; then
-  echo "render-schema: unreplaced Helm placeholder in $out" >&2
-  grep -n '{{' "$out" >&2
+sed \
+  -e 's|{{ .Values.clickhouse.database }}|otel|g' \
+  -e 's|{{ .Values.clickhouse.tables.traces }}|otel_traces|g' \
+  -e 's|{{ .Values.clickhouse.tables.logs }}|otel_logs|g' \
+  -e 's|{{ .Values.clickhouse.tables.metricsGauge }}|otel_metrics_gauge|g' \
+  -e 's|{{ .Values.clickhouse.tables.metricsSum }}|otel_metrics_sum|g' \
+  -e 's|{{ .Values.clickhouse.tables.metricsHistogram }}|otel_metrics_histogram|g' \
+  -e 's|{{ .Values.clickhouse.tables.metricsExponentialHistogram }}|otel_metrics_exponential_histogram|g' \
+  -e 's|{{ .Values.clickhouse.tables.metricsSummary }}|otel_metrics_summary|g' \
+  "$migrate_src" >"$migrate_out"
+
+if grep -q '{{' "$out" "$migrate_out"; then
+  echo "render-schema: unreplaced Helm placeholder in $out or $migrate_out" >&2
+  grep -n '{{' "$out" "$migrate_out" >&2
   exit 1
 fi
 
-echo "rendered $out"
+sh -n "$migrate_out"
+echo "rendered $out and $migrate_out"

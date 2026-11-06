@@ -43,7 +43,7 @@ existing Grafana.
 | systemd deployment | Alpha | Unit files for single-process and frontend/query split, local schema renderer, and a full operations guide in [docs/systemd.md](docs/systemd.md). |
 | AI SRE context API | Alpha | Optional compact catalog for metrics, services, logs, and traces, plus stdio/HTTP MCP tools. Unknown signals can include ClickHouse observed metadata labeled `known:false`/`observed_only`; observed-only suggestions require human review. Coverage is exposed as JSON and `/metrics`. See [docs/ai-context.md](docs/ai-context.md). |
 | S3 retention and backups | Alpha | Optional ClickHouse tiered storage (hot -> S3 cold, still queryable) and a separate scheduled `BACKUP DATABASE` CronJob. Tested against RustFS 1.0.4. See [docs/storage.md](docs/storage.md). |
-| Durability checkpoint | Alpha | Optional stdlib-only local WAL (`checkpoint.enabled=true`) that receives a Collector fan-out, batches gzip segments to S3, and replays them through the Collector after ClickHouse loss. See [docs/checkpoint.md](docs/checkpoint.md). |
+| Durability checkpoint | Alpha | Optional stdlib-only local WAL (`checkpoint.enabled=true`) that receives a Collector fan-out, batches gzip segments to S3, and replays them through the Collector after ClickHouse loss. Replay is at-least-once in transport and deduplicated on read by the `ReplacingMergeTree` schema. See [docs/checkpoint.md](docs/checkpoint.md). |
 | LogQL full-text | Alpha | Stream selectors and body line filters are pushed into ClickHouse; `match(Body, ...)` uses the `idx_body` text index. Go remains the final evaluator. |
 | OpenSSF | Measured, public | The last official Scorecard snapshot reports **7.8**; it predates the release hardening and will be re-run after `v0.1.0-alpha.2`. Best Practices evidence is ready; a maintainer must submit it at bestpractices.dev. See [docs/openssf-scorecard.md](docs/openssf-scorecard.md). |
 | Release tooling | Implemented, first release pending | One annotated `vX.Y.Z` tag releases the image and OCI chart; the workflow verifies the tag is on `main`, then signs, attests, and publishes immutable artifacts. The first compliant release is `v0.1.0-alpha.2`. See [docs/release.md](docs/release.md). |
@@ -236,6 +236,7 @@ gateway to the internet without TLS and an authenticating edge. See
 - [Documentation index](docs/README.md)
 - [ADR 0001: observability stack](docs/adr/0001-observability-stack.md)
 - [ADR 0002: distributed read path](docs/adr/0002-distributed-read-path.md)
+- [ADR 0003: replay deduplication](docs/adr/0003-replay-deduplication.md)
 - [Installation and operations](docs/install.md)
 - [Running the gateway with systemd](docs/systemd.md)
 - [AI SRE context API](docs/ai-context.md)

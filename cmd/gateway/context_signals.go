@@ -46,7 +46,7 @@ func (o *observedSignals) ListObservedLogs(ctx context.Context) ([]semctx.Observ
 	o.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT ServiceName, SeverityText, EventName, count() AS count FROM `%s`.`%s` "+
+		"SELECT ServiceName, SeverityText, EventName, count() AS count FROM `%s`.`%s` FINAL "+
 			"WHERE Timestamp >= now() - INTERVAL 7 DAY "+
 			"GROUP BY ServiceName, SeverityText, EventName ORDER BY count DESC LIMIT 200",
 		o.database, o.tables.Logs,
@@ -83,7 +83,7 @@ func (o *observedSignals) ListObservedTraces(ctx context.Context) ([]semctx.Obse
 	o.mu.Unlock()
 
 	query := fmt.Sprintf(
-		"SELECT ServiceName, SpanName, SpanKind, count() AS count FROM `%s`.`%s` "+
+		"SELECT ServiceName, SpanName, SpanKind, count() AS count FROM `%s`.`%s` FINAL "+
 			"WHERE Timestamp >= now() - INTERVAL 7 DAY "+
 			"GROUP BY ServiceName, SpanName, SpanKind ORDER BY count DESC LIMIT 200",
 		o.database, o.tables.Traces,

@@ -152,6 +152,12 @@ func (e *Emitter) Emit(q plan.Query) (Result, error) {
 	b.WriteString(quoteIdent(e.schema.Database))
 	b.WriteByte('.')
 	b.WriteString(quoteIdent(q.Table))
+	// ReplacingMergeTree collapses replay duplicates only during a background
+	// merge. FINAL applies the same key-based deduplication to every read, so a
+	// replay is immediately invisible to the query heads. The ClickHouse client
+	// retries without FINAL when it reaches a plain MergeTree table
+	// (ILLEGAL_FINAL), which keeps pre-migration installs readable.
+	b.WriteString(" FINAL")
 	b.WriteByte('\n')
 	if whereSQL != "" {
 		b.WriteString("WHERE ")

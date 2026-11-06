@@ -304,7 +304,17 @@ func (c *Client) Query(ctx context.Context, sql string, params []plan.Param) (*R
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, parseError(resp.StatusCode, data)
+		queryErr := parseError(resp.StatusCode, data)
+		// FINAL is rejected by plain MergeTree. The chart migrates the signal
+		// tables to ReplacingMergeTree, but a gateway can start against an
+		// older schema while the init Job is still running. Retry without
+		// FINAL so reads stay available; only read-time deduplication is lost.
+		if isIllegalFinal(queryErr) {
+			if fallback, ok := withoutFinal(sql); ok {
+				return c.Query(ctx, fallback, params)
+			}
+		}
+		return nil, queryErr
 	}
 
 	var raw struct {
@@ -570,6 +580,27 @@ func isWordPart(b byte) bool {
 }
 
 var codePattern = regexp.MustCompile(`(?i)code:\s*([0-9]+)`)
+
+// illegalFinalCode is ClickHouse's ILLEGAL_FINAL code. Plain MergeTree tables
+// reject FINAL; ReplacingMergeTree tables accept it.
+const illegalFinalCode = "181"
+
+func isIllegalFinal(err error) bool {
+	var chErr *Error
+	return errors.As(err, &chErr) && chErr.Code == illegalFinalCode
+}
+
+// withoutFinal removes the first bare FINAL marker the emitter placed after a
+// table name. User values are query parameters and identifiers are backticked,
+// so this cannot touch a column or table named FINAL.
+func withoutFinal(sql string) (string, bool) {
+	const marker = " FINAL"
+	i := strings.Index(sql, marker)
+	if i < 0 {
+		return "", false
+	}
+	return sql[:i] + sql[i+len(marker):], true
+}
 
 func parseError(status int, data []byte) error {
 	message := strings.TrimSpace(string(data))
