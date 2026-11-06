@@ -117,7 +117,7 @@ the gateway.
 | Tempo wire format requested by Grafana (JSON vs protobuf) | Verified from the Grafana Tempo datasource source: it requests `/api/v2/traces` with `Accept: application/protobuf` and falls back to `/api/traces` on 404. The v2 `TraceByIDResponse` envelope is encoded manually without importing Tempo's AGPL protos. | Replay against a real Grafana during the alpha release checklist. |
 | OBI in CI | OBI needs kernel 5.8+, BTF, and privileges; standard CI runners may not qualify. | Use an OTLP generator in CI and test OBI on a dedicated VM. |
 | Official PromQL parser dependency tree | Measured: 15 modules in the build, all Apache-2.0/BSD-3/MIT; vendored. | Re-check on every version bump. |
-| Real ClickHouse compression and cost | Measured: 24.35 B/metric sample, 110.47 B/log line, 25.47 B/span on disk; p95 latency table in docs/benchmarks.md. | Re-run on reference hardware before beta. |
+| Real ClickHouse compression and cost | Measured: 24.35 B/metric sample, 110.22 B/log line, 25.44 B/span on disk; p95 latency table in docs/benchmarks.md. | Re-run on reference hardware before beta. |
 | Minimum supported ClickHouse version | Tested 26.8.36.3; logs use text indexes from 26.2. | Expand the test matrix before beta. |
 | Product differentiation versus cerberus, oteldb, ClickStack, and SigNoz | Written in README: Apache-2.0, three signals, Grafana-native datasources, OBI + Collector + ClickHouse, no AGPL, no vendor control plane. | Keep it factual as the competitive landscape changes. |
 

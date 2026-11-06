@@ -5,7 +5,25 @@ The harness is in [`test/bench`](../test/bench) and can be reproduced with one
 command.
 
 Run date: 2026-11-07 (local time). This run includes the replay-dedup
-`ReplacingMergeTree` schema and `FINAL` reads.
+`ReplacingMergeTree` schema and `FINAL` reads. The latency and resource tables
+below come from the cleaner of two 30-iteration runs; the earlier run had
+larger tail spikes.
+
+## Summary
+
+| Item | Value |
+| --- | --- |
+| Dataset | 2,658,400 main-table rows + 40,000 trace-lookup rows |
+| On disk | **103.8 MiB** total (102.9 MiB main tables + 1.0 MiB lookup) |
+| Storage cost | 24.35 B/metric sample, 110.22 B/log line, 25.44 B/span |
+| PromQL instant | p50 134-252 ms, p95 180-283 ms |
+| Tempo search | p50 592 ms, p95 701 ms |
+| Tempo trace by ID | p50 17.8 ms, p95 21.1 ms |
+| Loki range | p50 112.7 ms, p95 177.3 ms |
+| Query compute | 68.05 ClickHouse CPU-seconds for 945 SQL queries |
+| Query memory | 85.5 MiB peak per SQL query |
+| Dataset generation | 24.67 CPU-seconds, 2.2 GiB peak |
+| Gateway footprint | ~0.81 core average, 1.28 core peak, 592 MiB peak |
 
 ## Host and software
 
@@ -82,22 +100,22 @@ and the per-column compressed/uncompressed sizes from `system.columns`.
 
 | Table | Rows | On disk (bytes) | Bytes/row on disk | Compressed data bytes/row | Compression ratio |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `otel_logs` | 500,000 | 55,232,767 | 110.47 | 50.81 | 6.71x |
-| `otel_metrics_gauge` | 576,000 | 12,970,485 | 22.52 | 22.45 | 10.12x |
-| `otel_metrics_histogram` | 230,400 | 7,902,596 | 34.30 | 32.83 | 14.00x |
-| `otel_metrics_sum` | 1,152,000 | 26,819,285 | 23.28 | 23.24 | 10.88x |
-| `otel_traces` | 200,000 | 5,094,130 | 25.47 | 23.65 | 12.84x |
-| `otel_traces_trace_id_ts` (lookup) | 40,000 | 984,616 | 24.62 | n/a | n/a |
+| `otel_logs` | 500,000 | 55,107,861 | 110.22 | 50.05 | 6.71x |
+| `otel_metrics_gauge` | 576,000 | 12,946,963 | 22.48 | 22.10 | 10.12x |
+| `otel_metrics_histogram` | 230,400 | 7,915,577 | 34.36 | 33.66 | 14.00x |
+| `otel_metrics_sum` | 1,152,000 | 26,823,522 | 23.28 | 23.24 | 10.88x |
+| `otel_traces` | 200,000 | 5,087,934 | 25.44 | 24.15 | 12.89x |
+| `otel_traces_trace_id_ts` (lookup) | 40,000 | 982,367 | 24.56 | n/a | n/a |
 
 Per-signal totals for the main signal tables:
 
 | Signal | Rows | On disk (bytes) | Bytes/row on disk | Compressed data bytes/row |
 | --- | ---: | ---: | ---: | ---: |
-| Logs | 500,000 | 55,232,767 | **110.47** | **50.81** |
-| Metrics | 1,958,400 | 47,692,366 | **24.35** | **24.14** |
-| Traces | 200,000 | 5,094,130 | **25.47** | **23.65** |
+| Logs | 500,000 | 55,107,861 | **110.22** | **50.05** |
+| Metrics | 1,958,400 | 47,686,062 | **24.35** | **24.13** |
+| Traces | 200,000 | 5,087,934 | **25.44** | **24.15** |
 
-The trace lookup table adds about `984,616 / 200,000 = 4.92` bytes per span
+The trace lookup table adds about `982,367 / 200,000 = 4.91` bytes per span
 (one lookup row per trace, 40,000 rows for 200,000 spans).
 
 ### Interpretation
@@ -106,12 +124,12 @@ The trace lookup table adds about `984,616 / 200,000 = 4.92` bytes per span
   replay-dedup schema adds the 16-byte `_skopos_row_hash` and a wider
   `ReplacingMergeTree` key, so this is noticeably larger than the pre-dedup
   layout.
-- Logs are the expensive signal: **110.5 bytes per line on disk**, even though
-  the compressed column data is only 50.8 bytes/line. The gap is the primary
+- Logs are the expensive signal: **110.2 bytes per line on disk**, even though
+  the compressed column data is only 50.1 bytes/line. The gap is the primary
   key, marks, the schema's full-text/text indexes, materialized Kubernetes
   columns, and the replay-dedup hash. Capacity planning for the default 7-day
   log TTL should use the on-disk number, not the column-data number.
-- Traces cost about **25.5 bytes per span on disk** plus the trace lookup
+- Traces cost about **25.4 bytes per span on disk** plus the trace lookup
   index. This is close to the pre-dedup layout; the hash only applies to logs
   and metrics.
 
@@ -124,16 +142,16 @@ milliseconds.
 
 | Query | p50 | p95 | p99* | min | max | Response bytes |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `prom_instant_count` | 126.68 | 607.54 | 634.89 | 120.54 | 634.89 | 122 |
-| `prom_instant_by_service` | 130.91 | 624.43 | 627.91 | 120.48 | 627.91 | 234 |
-| `prom_histogram_p95` | 249.30 | 802.63 | 1138.01 | 231.83 | 1138.01 | 107 |
-| `prom_range_6h` | 1149.11 | 1973.97 | 2010.29 | 512.96 | 2010.29 | 12,098 |
-| `prom_series` | 212.07 | 815.25 | 838.04 | 192.72 | 838.04 | 31 |
-| `prom_label_values` | 2830.85 | 3603.74 | 3617.23 | 2146.43 | 3617.23 | 280 |
-| `tempo_search` | 1100.21 | 1191.56 | 1250.24 | 495.32 | 1250.24 | 20,709 |
-| `tempo_trace_by_id` | 14.80 | 131.10 | 139.40 | 13.53 | 139.40 | 3,012 |
-| `tempo_tags` | 1127.63 | 1228.95 | 1266.88 | 493.89 | 1266.88 | 623 |
-| `loki_query_range` | 110.00 | 789.38 | 792.01 | 106.94 | 792.01 | 24,645 |
+| `prom_instant_count` | 133.69 | 180.30 | 191.54 | 130.39 | 191.54 | 121 |
+| `prom_instant_by_service` | 142.15 | 262.53 | 281.02 | 129.61 | 281.02 | 234 |
+| `prom_histogram_p95` | 251.73 | 283.01 | 406.92 | 233.63 | 406.92 | 107 |
+| `prom_range_6h` | 529.30 | 649.47 | 652.50 | 500.74 | 652.50 | 12,067 |
+| `prom_series` | 203.55 | 291.22 | 357.71 | 179.46 | 357.71 | 31 |
+| `prom_label_values` | 1790.06 | 2663.43 | 2809.17 | 1519.12 | 2809.17 | 280 |
+| `tempo_search` | 592.07 | 701.49 | 848.53 | 537.25 | 848.53 | 20,709 |
+| `tempo_trace_by_id` | 17.77 | 21.08 | 24.96 | 16.12 | 24.96 | 3,012 |
+| `tempo_tags` | 606.21 | 718.77 | 735.27 | 541.44 | 735.27 | 623 |
+| `loki_query_range` | 112.70 | 177.34 | 278.33 | 104.16 | 278.33 | 24,645 |
 
 `*` With 30 samples, p99 is effectively the maximum. Treat it as such.
 
@@ -143,17 +161,15 @@ hours at a 60-second step; Tempo and Loki queries cover the last hour.
 
 ### Interpretation
 
-- Point lookups are still cheap: a trace by ID is about **15 ms p50**, but this
-  run had tail spikes to **~131 ms p95** through the trace ID bloom index and a
-  narrow time range. Treat the p50 as the stable figure.
-- Simple Prometheus instant queries are **~127-249 ms p50** and **~608-803 ms
+- Point lookups are fast: a trace by ID is about **18 ms p50 / 21 ms p95**
+  through the trace ID bloom index and a narrow time range.
+- Simple Prometheus instant queries are **~134-252 ms p50** and **~180-283 ms
   p95** at this dataset size. They are slower than the pre-dedup run because
   each query probes several metric tables with `FINAL`.
-- Queries that scan and aggregate a whole signal window are slower: Tempo
-  search and tag discovery are **~1.1 s p50 / ~1.2 s p95**, and Loki line
-  filtering is **~110 ms p50 / ~0.79 s p95**. These are alpha-path costs, not
-  an SLO.
-- `prom_label_values` is the outlier at **~2.8 s p50 / ~3.6 s p95**. The
+- Queries that scan and aggregate a whole signal window are **~0.59-0.61 s p50
+  / ~0.70-0.72 s p95** for Tempo search and tags, and **~113 ms p50 / ~177 ms
+  p95** for Loki line filtering. These are alpha-path costs, not an SLO.
+- `prom_label_values` is the outlier at **~1.79 s p50 / ~2.66 s p95**. The
   endpoint fetches series across the gauge, sum, and histogram tables and
   deduplicates in Go; it is a candidate for pushing label discovery into
   ClickHouse before beta.
@@ -169,17 +185,67 @@ deduplication. A directional p50 comparison:
 
 | Query | Pre-dedup (2026-11-01) | Post-dedup (2026-11-07) |
 | --- | ---: | ---: |
-| `prom_instant_count` | 32.86 ms | 126.68 ms |
-| `prom_label_values` | 1,462.70 ms | 2,830.85 ms |
-| `tempo_search` | 451.26 ms | 1,100.21 ms |
-| `tempo_trace_by_id` | 9.35 ms | 14.80 ms |
-| `loki_query_range` | 722.53 ms | 110.00 ms |
+| `prom_instant_count` | 32.86 ms | 133.69 ms |
+| `prom_label_values` | 1,462.70 ms | 1,790.06 ms |
+| `tempo_search` | 451.26 ms | 592.07 ms |
+| `tempo_trace_by_id` | 9.35 ms | 17.77 ms |
+| `loki_query_range` | 722.53 ms | 112.70 ms |
 
 The PromQL and Tempo regressions are consistent with the row hash and
 `FINAL` merge work. The Loki p50 improved in this run; cross-run comparisons
 are directional because the host is shared with Docker and the test runner.
 Storage also grew: metrics moved from ~8 to ~24 bytes/sample and logs from
 ~84 to ~110 bytes/line on disk.
+
+## Resource use
+
+Measured from the same 30-iteration run with ClickHouse `system.query_log` and
+a 1 Hz `docker stats` sampler. Docker CPU percentages are relative to one core;
+the host has 4 vCPUs.
+
+### Dataset generation
+
+| Metric | Value |
+| --- | ---: |
+| Inserts | 5 |
+| ClickHouse CPU | 24.67 CPU-seconds |
+| Peak query memory | 2.2 GiB |
+| Rows written | 2.70M |
+| Bytes written | 707 MiB |
+
+### Query workload
+
+300 API calls produced 945 gateway SQL queries.
+
+| Metric | Value |
+| --- | ---: |
+| ClickHouse query CPU | 68.05 CPU-seconds |
+| Rows read | 147.8M |
+| Bytes read | ~20.8 GiB |
+| Average SQL query latency | 40.89 ms |
+| p95 SQL query latency | 109.8 ms |
+| Peak per-query memory | 85.5 MiB |
+| ClickHouse container CPU | avg 0.65 core, p95 1.17 cores, peak 2.15 cores |
+| ClickHouse container memory | avg 485 MiB, sampled peak 804 MiB |
+| Gateway CPU | avg 0.81 core, p95 1.26 cores, peak 1.28 cores |
+| Gateway memory | avg 174 MiB, peak 592 MiB |
+
+The ClickHouse container peak is lower than the 2.2 GiB insert peak because the
+1 Hz sampler misses the shortest transient spikes. Per API call, the query path
+used about **0.23 ClickHouse CPU-seconds**, read **0.49M rows / ~71 MiB**, and
+peaked around **85 MiB** of query memory.
+
+### Per signal
+
+| Signal | SQL queries | CPU-seconds | Avg query | Rows read | Read volume | Peak memory |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Traces | 100 | 20.79 | 83.4 ms | 15.4M | 4.64 GiB | 85.5 MiB |
+| Metrics histogram | 198 | 17.83 | 71.3 ms | 36.0M | 9.49 GiB | 23.1 MiB |
+| Metrics sum | 198 | 16.57 | 41.6 ms | 47.9M | 2.81 GiB | 24.7 MiB |
+| Metrics gauge | 198 | 7.72 | 27.0 ms | 39.0M | 1.93 GiB | 9.2 MiB |
+| Logs | 19 | 4.42 | 103.5 ms | 9.36M | 2.41 GiB | 27.3 MiB |
+| Metrics summary | 198 | 0.62 | 2.8 ms | 0 | 0 | 6.9 MiB |
+| Metrics exponential histogram | 33 | 0.09 | 2.5 ms | 0 | 0 | 6.9 MiB |
 
 ## Limitations
 
@@ -213,7 +279,7 @@ Do not over-read these numbers:
    (`ReplacingMergeTree`, `_skopos_row_hash`, and `FINAL` reads). They do not
    include tiered storage or backups; cold-tier reads have S3 latency and
    request costs. Re-run `make bench` after enabling either.
-10. **Tail latency is noisy.** With 30 sequential samples, several p95 values
-    are much higher than p50. The run can include ClickHouse background merges
-    or host contention. Use p50 for capacity comparisons and re-run before
-    making SLO claims.
+10. **Tail latency is noisy.** Two 30-iteration runs produced different p95
+    values; the earlier run had spikes up to ~0.8-1.1 s on queries that show
+    ~180-700 ms here. Use p50 for capacity comparisons and re-run before making
+    SLO claims.
