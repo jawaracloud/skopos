@@ -32,6 +32,7 @@ budgets, and MCP tools.
 | [Running as systemd](systemd.md) | Single process or frontend/query split without Kubernetes |
 | [Helm chart distribution](chart-repository.md) | OCI chart install, chart versioning, signature verification |
 | [Tiered storage and backups](storage.md) | Hot/cold S3 storage, TTL, `BACKUP`/`RESTORE`, RustFS test |
+| [Durability checkpoint](checkpoint.md) | Recent-window WAL, segment/gzip upload, loss bounds, replay, configuration |
 | [Release process](release.md) | Tag-only image/OCI chart release, SBOM, keyless signing, attestations, immutable releases |
 
 ## Security
@@ -58,6 +59,7 @@ budgets, and MCP tools.
 | --- | --- |
 | [Benchmarks](benchmarks.md) | Compression, storage cost, and gateway query latency |
 | [Storage](storage.md) | Retention, cold tier, backup/restore, capacity behavior |
+| [Durability checkpoint](checkpoint.md) | Loss bounds, local WAL capacity, S3 uploads, replay |
 | [Installation](install.md) | Limits, NetworkPolicy, TTL, disk-full behavior, troubleshooting |
 
 ## Architecture and decisions
@@ -110,9 +112,11 @@ budgets, and MCP tools.
 ## Source layout
 
 ```text
-cmd/gateway/       gateway and query-worker binary
-cmd/skopos-mcp/    stdio/HTTP MCP server for AI SRE agents
-internal/          query heads, SQL emitter, ClickHouse client, context, auth
+cmd/gateway/           gateway and query-worker binary
+cmd/skopos-mcp/        stdio/HTTP MCP server for AI SRE agents
+cmd/skopos-checkpoint/ OTLP durability checkpoint and replay binary
+internal/              query heads, SQL emitter, ClickHouse client, context, auth
+internal/checkpoint/   stdlib WAL, SigV4 S3 client, gzip uploader, replay
 deploy/helm/       Helm chart
 deploy/systemd/    systemd units and env examples
 deploy/examples/   Grafana, Kubernetes, and context catalog examples
