@@ -7,6 +7,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	promlabels "github.com/prometheus/prometheus/model/labels"
@@ -38,13 +39,15 @@ func (e *Engine) Query(ctx context.Context, expr string, at time.Time) (Value, e
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse query: %v", ErrBadQuery, err)
 	}
-	span := maxSelectorSpan(parsed, e.lookback())
+	fetchStart, fetchEnd := selectorWindow(parsed, e.lookback(), at, at, at)
 	ec := &evalCtx{
 		engine:     e,
 		ctx:        ctx,
 		at:         at,
-		fetchStart: at.Add(-span),
-		fetchEnd:   at,
+		queryStart: at,
+		queryEnd:   at,
+		fetchStart: fetchStart,
+		fetchEnd:   fetchEnd,
 		cache:      make(map[string][]Series),
 	}
 	v, err := ec.eval(parsed)
@@ -77,12 +80,14 @@ func (e *Engine) QueryRange(ctx context.Context, expr string, start, end time.Ti
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse query: %v", ErrBadQuery, err)
 	}
-	span := maxSelectorSpan(parsed, e.lookback())
+	fetchStart, fetchEnd := selectorWindow(parsed, e.lookback(), start, end, start)
 	base := &evalCtx{
 		engine:     e,
 		ctx:        ctx,
-		fetchStart: start.Add(-span),
-		fetchEnd:   end,
+		queryStart: start,
+		queryEnd:   end,
+		fetchStart: fetchStart,
+		fetchEnd:   fetchEnd,
 		cache:      make(map[string][]Series),
 	}
 
@@ -147,6 +152,8 @@ type evalCtx struct {
 	engine     *Engine
 	ctx        context.Context
 	at         time.Time
+	queryStart time.Time
+	queryEnd   time.Time
 	fetchStart time.Time
 	fetchEnd   time.Time
 	cache      map[string][]Series
@@ -201,12 +208,26 @@ func (e *evalCtx) fetch(sel Selector) ([]Series, error) {
 	return series, nil
 }
 
-func (e *evalCtx) evalVectorSelector(vs *parser.VectorSelector) (Value, error) {
-	if vs.Timestamp != nil || vs.StartOrEnd != 0 {
-		return nil, errors.New("prom: @ modifiers are not supported")
+// selectorTime returns the timestamp at which a vector selector is evaluated.
+// It honours the @ modifier, including @ start() and @ end(), and defaults to
+// the current evaluation step. The offset is applied by the caller relative to
+// this timestamp.
+func (e *evalCtx) selectorTime(vs *parser.VectorSelector) time.Time {
+	switch vs.StartOrEnd {
+	case parser.START:
+		return e.queryStart
+	case parser.END:
+		return e.queryEnd
 	}
+	if vs.Timestamp != nil {
+		return time.UnixMilli(*vs.Timestamp)
+	}
+	return e.at
+}
+
+func (e *evalCtx) evalVectorSelector(vs *parser.VectorSelector) (Value, error) {
 	offset := vs.OriginalOffset
-	end := e.at.Add(-offset)
+	end := e.selectorTime(vs).Add(-offset)
 	start := end.Add(-e.engine.lookback())
 	series, err := e.fetch(selectorFromVector(vs))
 	if err != nil {
@@ -224,7 +245,7 @@ func (e *evalCtx) evalVectorSelector(vs *parser.VectorSelector) (Value, error) {
 		if last.T <= startMs {
 			continue
 		}
-		out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: e.at.UnixMilli(), SampleT: last.T, V: last.V})
+		out = append(out, VectorSample{Labels: cloneLabels(s.Labels), T: e.at.UnixMilli(), SampleT: last.T, SampleTValid: true, V: last.V})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
 	return out, nil
@@ -235,11 +256,8 @@ func (e *evalCtx) evalMatrixSelector(ms *parser.MatrixSelector) (Value, error) {
 	if !ok {
 		return nil, errors.New("prom: matrix selector does not contain a vector selector")
 	}
-	if vs.Timestamp != nil || vs.StartOrEnd != 0 {
-		return nil, errors.New("prom: @ modifiers are not supported")
-	}
 	offset := vs.OriginalOffset
-	end := e.at.Add(-offset)
+	end := e.selectorTime(vs).Add(-offset)
 	start := end.Add(-ms.Range)
 	series, err := e.fetch(selectorFromVector(vs))
 	if err != nil {
@@ -261,38 +279,87 @@ func (e *evalCtx) evalMatrixSelector(ms *parser.MatrixSelector) (Value, error) {
 	return out, nil
 }
 
-func selectorFromVector(vs *parser.VectorSelector) Selector {
-	return Selector{Matchers: append([]*promlabels.Matcher(nil), vs.LabelMatchers...)}
-}
-
-func maxSelectorSpan(expr parser.Expr, lookback time.Duration) time.Duration {
-	var span time.Duration
-	parser.Inspect(expr, func(node parser.Node, _ []parser.Node) error {
+// selectorWindow returns the union of the sample windows needed by every
+// selector in the expression. It accounts for @ modifiers and offsets so a
+// range query can fetch each selector once instead of once per step.
+func selectorWindow(expr parser.Expr, lookback time.Duration, queryStart, queryEnd, at time.Time) (time.Time, time.Time) {
+	var (
+		start, end time.Time
+		have       bool
+	)
+	add := func(centerStart, centerEnd time.Time, before time.Duration) {
+		lo, hi := centerStart.Add(-before), centerEnd
+		if !have || lo.Before(start) {
+			start = lo
+		}
+		if !have || hi.After(end) {
+			end = hi
+		}
+		have = true
+	}
+	centers := func(vs *parser.VectorSelector) (time.Time, time.Time) {
+		var lo, hi time.Time
+		switch vs.StartOrEnd {
+		case parser.START:
+			lo, hi = queryStart, queryStart
+		case parser.END:
+			lo, hi = queryEnd, queryEnd
+		default:
+			if vs.Timestamp != nil {
+				lo = time.UnixMilli(*vs.Timestamp)
+				hi = lo
+			} else {
+				lo, hi = queryStart, queryEnd
+			}
+		}
+		return lo.Add(-vs.OriginalOffset), hi.Add(-vs.OriginalOffset)
+	}
+	parser.Inspect(expr, func(node parser.Node, path []parser.Node) error {
 		switch n := node.(type) {
-		case *parser.VectorSelector:
-			if d := n.OriginalOffset + lookback; d > span {
-				span = d
-			}
 		case *parser.MatrixSelector:
-			offset := time.Duration(0)
-			if vs, ok := n.VectorSelector.(*parser.VectorSelector); ok {
-				offset = vs.OriginalOffset
+			vs, ok := n.VectorSelector.(*parser.VectorSelector)
+			if !ok {
+				return nil
 			}
-			if d := offset + n.Range + lookback; d > span {
-				span = d
+			lo, hi := centers(vs)
+			add(lo, hi, n.Range)
+		case *parser.VectorSelector:
+			if len(path) > 0 {
+				if _, ok := path[len(path)-1].(*parser.MatrixSelector); ok {
+					return nil
+				}
 			}
+			lo, hi := centers(n)
+			add(lo, hi, lookback)
 		}
 		return nil
 	})
-	if span <= 0 {
-		span = lookback
+	if !have {
+		return at.Add(-lookback), at
 	}
-	return span
+	return start, end
+}
+
+func selectorFromVector(vs *parser.VectorSelector) Selector {
+	return Selector{Matchers: append([]*promlabels.Matcher(nil), vs.LabelMatchers...)}
 }
 
 // --- Calls ---
 
 func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
+	v, err := e.evalCallInner(call)
+	if err != nil {
+		return nil, err
+	}
+	if vec, ok := v.(Vector); ok {
+		if err := ensureUniqueVector(vec); err != nil {
+			return nil, err
+		}
+	}
+	return v, nil
+}
+
+func (e *evalCtx) evalCallInner(call *parser.Call) (Value, error) {
 	name := call.Func.Name
 	switch name {
 	case "rate", "increase", "irate":
@@ -339,7 +406,11 @@ func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
 		if !ok {
 			return nil, errors.New("prom: histogram_quantile expects a vector of buckets")
 		}
-		return histogramQuantile(float64(q), vec, e.at), nil
+		result, err := histogramQuantile(float64(q), vec, e.at)
+		if err != nil {
+			return nil, err
+		}
+		return result, nil
 	case "time":
 		return Scalar(float64(e.at.UnixMilli()) / 1000), nil
 	case "timestamp":
@@ -351,9 +422,9 @@ func (e *evalCtx) evalCall(call *parser.Call) (Value, error) {
 		for _, s := range v {
 			labels := cloneLabels(s.Labels)
 			delete(labels, promlabels.MetricName)
-			stamp := s.SampleT
-			if stamp == 0 {
-				stamp = s.T
+			stamp := s.T
+			if s.SampleTValid {
+				stamp = s.SampleT
 			}
 			out = append(out, VectorSample{Labels: labels, T: e.at.UnixMilli(), V: float64(stamp) / 1000})
 		}
@@ -465,10 +536,12 @@ func (e *evalCtx) matrixWindow(call *parser.Call) (time.Time, time.Time) {
 		return e.at, e.at
 	}
 	offset := time.Duration(0)
+	end := e.at
 	if vs, ok := ms.VectorSelector.(*parser.VectorSelector); ok {
 		offset = vs.OriginalOffset
+		end = e.selectorTime(vs)
 	}
-	end := e.at.Add(-offset)
+	end = end.Add(-offset)
 	return end.Add(-ms.Range), end
 }
 
@@ -554,14 +627,7 @@ func (e *evalCtx) overTime(name string, matrix Matrix) Vector {
 		var value float64
 		switch name {
 		case "avg_over_time":
-			sum, c := 0.0, 0.0
-			for _, v := range values {
-				sum, c = kahanAdd(v, sum, c)
-			}
-			value = sum/float64(len(values)) + c/float64(len(values))
-			if math.IsInf(sum, 0) {
-				value = sum
-			}
+			value = mean(values)
 		case "min_over_time":
 			value = values[0]
 			for _, v := range values[1:] {
@@ -1037,7 +1103,15 @@ func (e *evalCtx) vectorBinary(op string, lhs, rhs Vector, matching *parser.Vect
 	for _, sample := range rhs {
 		key := matchingKey(sample.Labels, matching)
 		if _, exists := rightByKey[key]; exists {
-			return nil, errors.New("prom: many-to-many matching is not supported")
+			duplicates := make([]string, 0, 2)
+			for _, duplicate := range rhs {
+				if matchingKey(duplicate.Labels, matching) == key {
+					duplicates = append(duplicates, promlabels.FromMap(duplicate.Labels).String())
+				}
+			}
+			sort.Strings(duplicates)
+			group := promlabels.FromMap(matchingLabels(sample.Labels, matching)).String()
+			return nil, fmt.Errorf("found duplicate series for the match group %s on the right hand-side of the operation: [%s];many-to-many matching not allowed: matching labels must be unique on one side", group, strings.Join(duplicates, ", "))
 		}
 		rightByKey[key] = sample
 	}
@@ -1117,6 +1191,10 @@ func binaryResultLabels(left, right map[string]string, op string, matching *pars
 }
 
 func matchingKey(l map[string]string, matching *parser.VectorMatching) string {
+	return labelsKey(matchingLabels(l, matching))
+}
+
+func matchingLabels(l map[string]string, matching *parser.VectorMatching) map[string]string {
 	selected := make(map[string]string)
 	if matching.On {
 		for _, name := range matching.MatchingLabels {
@@ -1136,7 +1214,7 @@ func matchingKey(l map[string]string, matching *parser.VectorMatching) string {
 			}
 		}
 	}
-	return labelsKey(selected)
+	return selected
 }
 
 func isArithmetic(op string) bool {
@@ -1225,6 +1303,9 @@ func (e *evalCtx) evalUnary(un *parser.UnaryExpr) (Value, error) {
 			delete(labels, promlabels.MetricName)
 			out = append(out, VectorSample{Labels: labels, T: s.T, V: -s.V})
 		}
+		if err := ensureUniqueVector(out); err != nil {
+			return nil, err
+		}
 		return out, nil
 	default:
 		return nil, errors.New("prom: unary minus expects a scalar or vector")
@@ -1241,42 +1322,88 @@ func vectorValue(v Value) (Vector, error) {
 	return vec, nil
 }
 
-func sum(values []float64) float64 {
-	var out float64
-	for _, v := range values {
-		out += v
+// ensureUniqueVector rejects vectors with duplicate label sets, matching the
+// reference engine's "vector cannot contain metrics with the same labelset"
+// error. Name-dropping operations can create such collisions.
+func ensureUniqueVector(vec Vector) error {
+	seen := make(map[string]struct{}, len(vec))
+	for _, sample := range vec {
+		key := labelsKey(sample.Labels)
+		if _, ok := seen[key]; ok {
+			return errors.New("vector cannot contain metrics with the same labelset")
+		}
+		seen[key] = struct{}{}
 	}
-	return out
+	return nil
+}
+
+func sum(values []float64) float64 {
+	var total, compensation float64
+	for _, v := range values {
+		total, compensation = kahanAdd(v, total, compensation)
+	}
+	return total + compensation
 }
 
 func mean(values []float64) float64 {
 	if len(values) == 0 {
 		return math.NaN()
 	}
-	return sum(values) / float64(len(values))
+	var (
+		total        float64
+		compensation float64
+		mean         float64
+		count        float64
+		incremental  bool
+	)
+	for _, v := range values {
+		count++
+		if !incremental {
+			nextTotal, nextCompensation := kahanAdd(v, total, compensation)
+			if !math.IsInf(nextTotal, 0) || math.IsInf(v, 0) || math.IsInf(total, 0) {
+				total, compensation = nextTotal, nextCompensation
+				continue
+			}
+			// The direct sum would overflow. Fall back to an incremental
+			// mean, matching the reference evaluator.
+			incremental = true
+			mean = total / (count - 1)
+			compensation /= count - 1
+		}
+		q := (count - 1) / count
+		mean, compensation = kahanAdd(v/count, q*mean, q*compensation)
+	}
+	if incremental {
+		return mean + compensation
+	}
+	return (total + compensation) / count
 }
 
 func minValue(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	out := values[0]
-	for _, v := range values[1:] {
-		if v < out {
+	out := math.NaN()
+	found := false
+	for _, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
+		if !found || v < out {
 			out = v
+			found = true
 		}
 	}
 	return out
 }
 
 func maxValue(values []float64) float64 {
-	if len(values) == 0 {
-		return math.NaN()
-	}
-	out := values[0]
-	for _, v := range values[1:] {
-		if v > out {
+	out := math.NaN()
+	found := false
+	for _, v := range values {
+		if math.IsNaN(v) {
+			continue
+		}
+		if !found || v > out {
 			out = v
+			found = true
 		}
 	}
 	return out
@@ -1286,13 +1413,7 @@ func variance(values []float64) float64 {
 	if len(values) == 0 {
 		return math.NaN()
 	}
-	m := mean(values)
-	var out float64
-	for _, v := range values {
-		d := v - m
-		out += d * d
-	}
-	return out / float64(len(values))
+	return varianceOverTime(values)
 }
 
 func quantileSorted(q float64, values []float64) float64 {
@@ -1321,7 +1442,7 @@ func quantileSorted(q float64, values []float64) float64 {
 // histogramQuantile implements the reference Prometheus classic-histogram
 // quantile algorithm, including the required +Inf bucket, bucket coalescing,
 // monotonicity repair, and special handling for out-of-range quantiles.
-func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
+func histogramQuantile(q float64, buckets Vector, at time.Time) (Vector, error) {
 	type bucket struct {
 		bound float64
 		count float64
@@ -1329,6 +1450,7 @@ func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
 	type histogram struct {
 		labels  map[string]string
 		buckets []bucket
+		seenLE  map[float64]string
 	}
 	groups := make(map[string]*histogram)
 	for _, sample := range buckets {
@@ -1342,13 +1464,21 @@ func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
 		}
 		labels := cloneLabels(sample.Labels)
 		delete(labels, "le")
+		name := labels[promlabels.MetricName]
 		delete(labels, promlabels.MetricName)
 		key := labelsKey(labels)
 		group := groups[key]
 		if group == nil {
-			group = &histogram{labels: labels}
+			group = &histogram{labels: labels, seenLE: make(map[float64]string)}
 			groups[key] = group
 		}
+		// Two classic histograms with different metric names but the same
+		// non-name labels are ambiguous. Prometheus rejects this instead of
+		// silently summing their buckets.
+		if previous, exists := group.seenLE[bound]; exists && previous != name {
+			return nil, errors.New("vector cannot contain metrics with the same labelset")
+		}
+		group.seenLE[bound] = name
 		group.buckets = append(group.buckets, bucket{bound: bound, count: sample.V})
 	}
 	out := make(Vector, 0, len(groups))
@@ -1419,7 +1549,7 @@ func histogramQuantile(q float64, buckets Vector, at time.Time) Vector {
 		out = append(out, VectorSample{Labels: group.labels, T: at.UnixMilli(), V: value})
 	}
 	sort.Slice(out, func(i, j int) bool { return labelsKey(out[i].Labels) < labelsKey(out[j].Labels) })
-	return out
+	return out, nil
 }
 
 func almostEqualBucketCounts(a, b float64) bool {

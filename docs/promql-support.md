@@ -12,7 +12,8 @@ evaluator runs in the gateway over samples fetched from ClickHouse.
 
 The claimed surface below is checked by a differential harness that runs the
 same deterministic series through this engine and the official Prometheus
-`promql` engine. See [Tests](#tests).
+`promql` engine, and by the official upstream PromQL compliance scripts from a
+pinned Prometheus release. See [Tests](#tests).
 
 ## Endpoints
 
@@ -44,7 +45,9 @@ same deterministic series through this engine and the official Prometheus
   come from the metric `Attributes` map.
 - Metric unit suffixes are **not** appended yet. Query the normalized OTel
   name, not the Prometheus-convention name with `_seconds` or `_bytes`.
-- `@` modifiers and subqueries are not supported.
+- `@` modifiers with an absolute Unix timestamp, `start()`, or `end()`;
+  `offset` is applied relative to the `@` timestamp.
+- Subqueries (`metric[5m:1m]`) are not supported and return an explicit error.
 
 ## Functions
 
@@ -73,12 +76,16 @@ approximated by the 5-minute lookback.
 `histogram_quantile` follows the reference classic-histogram algorithm:
 `q < 0` returns `-Inf`, `q > 1` returns `+Inf`, `q = NaN` returns `NaN`, a
 missing `+Inf` bucket or fewer than two buckets returns `NaN`, duplicate upper
-bounds are coalesced, and non-monotonic bucket counts are repaired before
-interpolation.
+bounds within one histogram are coalesced, and non-monotonic bucket counts are
+repaired before interpolation. Selecting two classic histograms with different
+metric names but the same remaining label set is rejected instead of silently
+merging their buckets.
 
 `label_replace` and `label_join` preserve the metric name unless the destination
-label is `__name__`. Replacing labels in a way that produces two series with the
-same label set returns an explicit error, as Prometheus does.
+label is `__name__`. `label_replace` accepts any source label name, including
+one that is not present (`""` matches the empty string). An empty destination
+value removes the label. Replacing labels in a way that produces two series with
+the same label set returns an explicit error, as Prometheus does.
 
 `absent` and `absent_over_time` return `1` with the equality matchers of a
 direct selector when their argument is empty. Regex and negated matchers are
@@ -88,9 +95,13 @@ Prometheus's historical behaviour.
 ## Aggregations and binary operators
 
 - Aggregations: `sum`, `avg`, `min`, `max`, `count`, `stddev`, `stdvar`,
-  `group`, `topk`, `bottomk`, `count_values` with `by` and `without`.
+  `group`, `topk`, `bottomk`, `count_values` with `by` and `without`. The
+  `quantile` aggregation is not implemented and returns an explicit error.
 - `topk`/`bottomk` return the original series labels and metric name. `k <= 0`
-  returns an empty vector, and NaNs are selected last.
+  returns an empty vector, NaNs are selected last, and a NaN `k` returns an
+  error as in Prometheus.
+- `sum`, `avg`, `stddev`, and `stdvar` use compensated summation. `min`/`max`
+  ignore NaN values unless every value in the group is NaN.
 - Arithmetic and comparison operators between scalar/vector and
   vector/vector.
 - Vector/vector matching supports one-to-one, `group_left`, and `group_right`,
@@ -128,10 +139,33 @@ histograms.
 - Native histograms and exemplars are not supported.
 - Exponential histograms are stored but not queryable (see the table above).
 - Metric unit suffixes are not appended (see the label section above).
+- PromQL warning and info annotations are not emitted. Cases that expect a
+  warning/info annotation fail the official suite.
+- Prometheus 3 `__type__`/`__unit__` metric metadata labels are not
+  implemented.
+- Prometheus 3 delayed `__name__` removal is not implemented. A function drops
+  the metric name immediately, so a later `label_replace`/`label_join` cannot
+  recover it from `__name__`.
+- Start timestamps (`@st` in fixtures and `start_timestamp()`) are not stored
+  or evaluated.
+- Top-level string literals are not supported as query results.
+- Instant queries that would return a range vector (a matrix, for example
+  `metric[5m]`) are rejected.
+- Result ordering is not guaranteed. `sort`/`sort_desc` order a single instant
+  result, but the HTTP API does not promise ordering across queries and
+  `topk`/`bottomk` output is label-sorted.
 - Examples of unlisted functions that return an explicit error:
   `deriv`, `predict_linear`, `holt_winters`, `resets`, `changes`, `delta`,
-  `idelta`, `first_over_time`, `histogram_count`, `histogram_sum`, and the
-  experimental `limitk`/`limit_ratio` aggregations.
+  `idelta`, `first_over_time`, `histogram_count`, `histogram_sum`,
+  `histogram_fraction`, `histogram_quantiles`, the date/time functions
+  (`minute`, `month`, `year`, `day_of_month`, `day_of_year`,
+  `days_in_month`), the trigonometric functions, `info`, `sort_by_label`,
+  `double_exponential_smoothing`, `mad_over_time`, `ts_of_first_over_time`,
+  `ts_of_last_over_time`, `min_of`/`max_of`, `range`/`step`/`start`/`end`
+  used as functions (the `@ start()`/`@ end()` selector modifiers are
+  supported), and the experimental `limitk`/`limit_ratio` aggregations.
+- Experimental syntax is not enabled: duration expressions, binary-operator
+  fill modifiers, and anchored/smoothed range selectors.
 - A query scans the gauge, sum, histogram, and summary tables for each
   selector, plus one bounded probe of the exponential-histogram table when the
   selector matched nothing. The gateway enforces a row scan limit
@@ -159,6 +193,84 @@ histograms.
   cd test/compat/prometheus
   go test ./...
   ```
+
+- The official Prometheus compliance suite at `test/compat/prometheus`. The
+  harness pins Prometheus **3.15.1** (commit
+  `bae3eced0a5369e050e83ea73bc381d7c4b1a719`, archive SHA-256
+  `4636cc523bda30bdf92bf7b05b4491bb3d3038d89ebb3223c7b9a71f23e9e9c9`) and
+  downloads the tag archive into a cache directory after verifying the
+  checksum. It then runs the unmodified upstream
+  `promql/promqltest/testdata/*.test` scripts through an in-process adapter
+  around `internal/prom`, using the official test storage. This exercises the
+  same evaluator as the gateway's query endpoints, but not the ClickHouse SQL
+  translation; the differential oracle and integration tests cover that layer.
+  Run it with:
+
+  ```sh
+  test/compat/prometheus/compliance.sh
+  ```
+
+  The last full run (2026-11-07) executed 2,243 eval cases: **687 passed**,
+  **1,556 failed with an explicit documented unsupported feature**, 0
+  unexpected failures, 0 skipped. This is **not** a full compliance pass.
+  Results by file:
+
+  | File | Pass | Expected unsupported |
+  | --- | ---: | ---: |
+  | `aggregators.test` | 110 | 50 |
+  | `at_modifier.test` | 41 | 37 |
+  | `collision.test` | 2 | 0 |
+  | `duration_expression.test` | 6 | 53 |
+  | `extended_vectors.test` | 22 | 152 |
+  | `fill-modifier.test` | 1 | 45 |
+  | `functions.test` | 193 | 245 |
+  | `histograms.test` | 50 | 135 |
+  | `info.test` | 1 | 69 |
+  | `limit.test` | 0 | 37 |
+  | `literals.test` | 20 | 5 |
+  | `name_label_dropping.test` | 20 | 10 |
+  | `native_histograms.test` | 0 | 522 |
+  | `operators.test` | 127 | 87 |
+  | `range_queries.test` | 8 | 10 |
+  | `selectors.test` | 31 | 0 |
+  | `staleness.test` | 10 | 7 |
+  | `start_timestamps.test` | 0 | 26 |
+  | `subquery.test` | 2 | 32 |
+  | `trig_functions.test` | 0 | 19 |
+  | `type_and_unit.test` | 43 | 15 |
+
+  Unsupported categories, with the number of cases they account for:
+
+  | Category | Cases | Why |
+  | --- | ---: | --- |
+  | `native-histograms-file` | 522 | native histogram fixture file |
+  | `native-histograms-data` | 219 | native histogram samples return an explicit error |
+  | `unsupported-function` | 156 | function outside the published list |
+  | `extended-range-selectors` | 152 | experimental anchored/smoothed selectors |
+  | `experimental-feature` | 99 | experimental function/syntax gate |
+  | `subqueries` | 72 | subqueries are not supported |
+  | `info-function` | 69 | experimental `info()` |
+  | `duration-expressions` | 53 | experimental duration expressions |
+  | `fill-modifiers` | 45 | experimental binary fill modifiers |
+  | `limitk-limit-ratio` | 37 | experimental `limitk`/`limit_ratio` |
+  | `start-timestamps` | 26 | `@st` and `start_timestamp()` |
+  | `trig-functions` | 19 | trigonometric functions |
+  | `native-histograms-expected` | 15 | expected native histogram points |
+  | `annotations` | 15 | warning/info annotations are not emitted |
+  | `type-unit-labels` | 15 | `__type__`/`__unit__` metadata labels |
+  | `delayed-name-removal` | 10 | delayed `__name__` removal |
+  | `quantile-aggregation` | 8 | `quantile` aggregation |
+  | `ordered-results` | 7 | `expect ordered` checks |
+  | `staleness-markers` | 7 | no staleness markers in ClickHouse |
+  | `string-literals` | 5 | top-level string results |
+  | `range-vector-instant` | 4 | instant matrix results |
+  | `count-values-invalid-label` | 1 | error text for non-UTF-8 label input |
+
+  The mapping from every failing case to a category lives in
+  `test/compat/prometheus/compliance/exceptions.json`; the run report contains
+  a per-case detail table. The gate fails if any failing case does not match a
+  category, so an undocumented failure cannot pass silently.
+  `compliance.sh --files selectors.test,operators.test` runs a reduced subset.
 
 - Integration tests against ClickHouse 26.8 for instant queries, range queries,
   histogram quantile, summary expansion, exponential-histogram errors,

@@ -1,0 +1,56 @@
+name: PromQL compliance
+
+on:
+  workflow_dispatch:
+    inputs:
+      files:
+        description: "Comma-separated .test files (empty runs the full suite)"
+        required: false
+        default: ""
+  schedule:
+    # Weekly, Monday 04:17 UTC.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: promql-compliance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compliance:
+    name: Official Prometheus PromQL suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: test/compat/prometheus/go.mod
+          cache-dependency-path: test/compat/prometheus/go.sum
+
+      - name: Run official PromQL compliance suite
+        env:
+          SKOPOS_PROMQL_COMPLIANCE_CACHE: ${{ runner.temp }}/promql-compliance
+          COMPLIANCE_FILES: ${{ inputs.files }}
+        run: |
+          args=(--report "${RUNNER_TEMP}/promql-compliance-report.md")
+          if [[ -n "${COMPLIANCE_FILES}" ]]; then
+            args+=(--files "${COMPLIANCE_FILES}")
+          fi
+          test/compat/prometheus/compliance.sh "${args[@]}"
+
+      - name: Upload compliance report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: promql-compliance-report
+          path: |
+            ${{ runner.temp }}/promql-compliance-report.md
+            ${{ runner.temp }}/promql-compliance/compliance-go-test.json
+            ${{ runner.temp }}/promql-compliance/compliance-stderr.log
+          if-no-files-found: warn

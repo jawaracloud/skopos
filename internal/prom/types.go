@@ -30,12 +30,15 @@ type Series struct {
 }
 
 // VectorSample is one instant-vector element. T is the evaluation timestamp;
-// SampleT is the original sample timestamp (used by timestamp()).
+// SampleT is the original sample timestamp (used by timestamp()) and is only
+// valid when SampleTValid is true. Synthetic samples produced by expressions
+// have no original timestamp; timestamp() falls back to T for those.
 type VectorSample struct {
-	Labels  map[string]string
-	T       int64
-	V       float64
-	SampleT int64
+	Labels       map[string]string
+	T            int64
+	V            float64
+	SampleT      int64
+	SampleTValid bool
 }
 
 // ErrBadQuery marks parse and unsupported-expression errors that are the

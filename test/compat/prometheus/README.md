@@ -43,6 +43,27 @@ The reference storage is a small in-memory `storage.Queryable` in `storage.go`.
 It avoids the TSDB and the test-only `promqltest` package while still using the
 official evaluator and public storage interfaces.
 
+## Official PromQL compliance suite
+
+`compliance.sh` runs the unmodified upstream Prometheus PromQL test scripts
+against the same `internal/prom` evaluator used by the gateway. It fetches and
+verifies the pinned Prometheus 3.15.1 source archive, then runs the adapter in
+`compliance/` and classifies every failure against
+`compliance/exceptions.json`. The gate fails on any failure that is not an
+explicitly documented unsupported feature.
+
+```sh
+./compliance.sh
+./compliance.sh --files selectors.test,operators.test  # reduced scope
+./compliance.sh --report /tmp/promql-compliance.md      # custom report
+```
+
+Pin details live in `compliance/PROVENANCE.md` and at the top of
+`compliance.sh`. The latest published result is in
+[`docs/promql-support.md`](../../../docs/promql-support.md#tests). A normal
+`go test ./...` skips the compliance test when
+`PROMETHEUS_COMPLIANCE_TESTDATA` is not set.
+
 ## Not covered
 
 - Samples in the future, `@` modifiers, subqueries, and negative offsets are

@@ -1,0 +1,138 @@
+{
+  "prometheus_release": "3.15.1",
+  "prometheus_commit": "bae3eced0a5369e050e83ea73bc381d7c4b1a719",
+  "categories": [
+    {
+      "id": "native-histograms-file",
+      "feature": "Native histogram storage/evaluation is not supported.",
+      "docs": "docs/promql-support.md#metric-types",
+      "files": ["native_histograms.test"]
+    },
+    {
+      "id": "info-function",
+      "feature": "The experimental info() function is not supported.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["info.test"]
+    },
+    {
+      "id": "limitk-limit-ratio",
+      "feature": "The experimental limitk/limit_ratio aggregations are not supported.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["limit.test"]
+    },
+    {
+      "id": "start-timestamps",
+      "feature": "Start timestamps (@st, start_timestamp()) are not stored or evaluated.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["start_timestamps.test"]
+    },
+    {
+      "id": "trig-functions",
+      "feature": "Trigonometric functions are not implemented.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["trig_functions.test"]
+    },
+    {
+      "id": "duration-expressions",
+      "feature": "Experimental duration expressions in PromQL are not enabled.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["duration_expression.test"]
+    },
+    {
+      "id": "fill-modifiers",
+      "feature": "Experimental binary-operator fill modifiers are not enabled.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["fill-modifier.test"]
+    },
+    {
+      "id": "extended-range-selectors",
+      "feature": "Experimental anchored/smoothed range selectors are not enabled.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["extended_vectors.test"]
+    },
+    {
+      "id": "delayed-name-removal",
+      "feature": "Prometheus 3 delayed __name__ removal is not implemented; label_replace/label_join cannot recover a name dropped earlier.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["name_label_dropping.test"]
+    },
+    {
+      "id": "staleness-markers",
+      "feature": "ClickHouse samples have no staleness markers; staleness is approximated by the 5m lookback.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "files": ["staleness.test"]
+    },
+    {
+      "id": "native-histograms-data",
+      "feature": "Native histogram samples are stored but not queryable; the adapter returns an explicit error.",
+      "docs": "docs/promql-support.md#metric-types",
+      "error_regex": "skopos: native histogram samples are not supported"
+    },
+    {
+      "id": "native-histograms-expected",
+      "feature": "Cases that expect native histogram points in the result are not supported.",
+      "docs": "docs/promql-support.md#metric-types",
+      "error_regex": "histogram points"
+    },
+    {
+      "id": "subqueries",
+      "feature": "Subqueries are not supported.",
+      "docs": "docs/promql-support.md#selectors-and-labels",
+      "error_regex": "subqueries are not supported"
+    },
+    {
+      "id": "unsupported-function",
+      "feature": "Functions outside the published support list return an explicit unsupported-function error.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "prom: unsupported function"
+    },
+    {
+      "id": "experimental-feature",
+      "feature": "Experimental PromQL syntax/function gates required by the case are not enabled.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "is not enabled|experimental .* enabled"
+    },
+    {
+      "id": "annotations",
+      "feature": "PromQL warning/info annotations are not emitted.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "annotations but none were found"
+    },
+    {
+      "id": "type-unit-labels",
+      "feature": "Prometheus 3 __type__/__unit__ metric metadata labels are not implemented.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "__type__|__unit__"
+    },
+    {
+      "id": "quantile-aggregation",
+      "feature": "The quantile aggregation is not implemented.",
+      "docs": "docs/promql-support.md#aggregations-and-binary-operators",
+      "error_regex": "unsupported aggregation \"quantile\""
+    },
+    {
+      "id": "ordered-results",
+      "feature": "expect ordered result checks are not met; the HTTP API does not guarantee result ordering.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "at position"
+    },
+    {
+      "id": "string-literals",
+      "feature": "Top-level string literals are not supported as query results.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "string literals are not supported"
+    },
+    {
+      "id": "range-vector-instant",
+      "feature": "Instant queries returning a range vector (matrix) are rejected.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "range vector is not a valid instant query result"
+    },
+    {
+      "id": "count-values-invalid-label",
+      "feature": "The invalid-label error text for count_values differs from Prometheus for non-UTF-8 input.",
+      "docs": "docs/promql-support.md#known-limitations",
+      "error_regex": "count_values: invalid label name"
+    }
+  ]
+}

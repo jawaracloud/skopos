@@ -1,6 +1,7 @@
 package prom
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"regexp"
@@ -31,9 +32,12 @@ func (e *evalCtx) evalAggregateK(agg *parser.AggregateExpr, op string) (Value, e
 		return nil, err
 	}
 	kf := float64(kParam)
+	if math.IsNaN(kf) {
+		return nil, errors.New("Parameter value is NaN")
+	}
 	k := int64(kf)
 	switch {
-	case math.IsNaN(kf), kf < 0:
+	case kf < 0:
 		k = 0
 	case math.IsInf(kf, 1):
 		k = int64(len(vec))
@@ -86,7 +90,7 @@ func (e *evalCtx) evalCountValues(agg *parser.AggregateExpr) (Value, error) {
 		return nil, fmt.Errorf("prom: count_values: %w", err)
 	}
 	if !validLegacyLabelName(valueLabel) {
-		return nil, fmt.Errorf("prom: count_values: invalid label name %q", valueLabel)
+		return nil, fmt.Errorf("prom: count_values: invalid label name \"%s\"", valueLabel)
 	}
 	v, err := e.eval(agg.Expr)
 	if err != nil {
@@ -221,9 +225,6 @@ func (e *evalCtx) evalLabelFunction(name string, call *parser.Call) (Value, erro
 		if !validLegacyLabelName(dst) {
 			return nil, fmt.Errorf("prom: label_replace: invalid destination label name %q", dst)
 		}
-		if !validLegacyLabelName(src) && src != promlabels.MetricName {
-			return nil, fmt.Errorf("prom: label_replace: invalid source label name %q", src)
-		}
 		re, err := regexp.Compile("^(?s:" + regexStr + ")$")
 		if err != nil {
 			return nil, fmt.Errorf("prom: label_replace: invalid regular expression: %w", err)
@@ -234,11 +235,16 @@ func (e *evalCtx) evalLabelFunction(name string, call *parser.Call) (Value, erro
 			if indexes == nil {
 				return
 			}
-			labels[dst] = string(re.ExpandString(nil, repl, srcValue, indexes))
+			value := string(re.ExpandString(nil, repl, srcValue, indexes))
+			if value == "" {
+				delete(labels, dst)
+				return
+			}
+			labels[dst] = value
 		}
 	case "label_join":
-		if len(call.Args) < 4 {
-			return nil, fmt.Errorf("prom: label_join expects at least four arguments")
+		if len(call.Args) < 3 {
+			return nil, fmt.Errorf("prom: label_join expects at least three arguments")
 		}
 		dst, err := callStringArg(call.Args[1], 1)
 		if err != nil {
@@ -267,7 +273,12 @@ func (e *evalCtx) evalLabelFunction(name string, call *parser.Call) (Value, erro
 			for i, source := range sources {
 				values[i] = labels[source]
 			}
-			labels[dst] = strings.Join(values, separator)
+			value := strings.Join(values, separator)
+			if value == "" {
+				delete(labels, dst)
+				return
+			}
+			labels[dst] = value
 		}
 	default:
 		return nil, fmt.Errorf("prom: unsupported label function %q", name)
@@ -280,7 +291,7 @@ func (e *evalCtx) evalLabelFunction(name string, call *parser.Call) (Value, erro
 		transform(labels)
 		key := labelsKey(labels)
 		if _, exists := seen[key]; exists {
-			return nil, fmt.Errorf("prom: %s produced duplicate label sets", name)
+			return nil, errors.New("vector cannot contain metrics with the same labelset")
 		}
 		seen[key] = struct{}{}
 		out = append(out, VectorSample{Labels: labels, T: sample.T, V: sample.V})
