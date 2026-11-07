@@ -468,28 +468,25 @@ func normalizeKind(kind string) string {
 
 // ParseTraceQL parses the alpha TraceQL subset: one spanset with &&/|| and the
 // operators =, !=, =~, !~, >, <, >=, <=. Structural operators, pipelines,
-// metrics queries, multiple spansets, and aggregation are rejected with an
-// explicit error.
+// metrics queries, multiple spansets, grouping, and aggregation are rejected
+// with an explicit error that names the unsupported feature.
 func ParseTraceQL(query string) (Filter, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil, nil
 	}
-	if !strings.HasPrefix(query, "{") || !strings.HasSuffix(query, "}") {
-		if strings.Contains(query, "|") {
-			return nil, fmt.Errorf("tempo: TraceQL pipelines and metrics queries are not supported")
-		}
-		return nil, fmt.Errorf("tempo: TraceQL must be a single { ... } spanset")
+	body, tail, err := splitTraceQLSpanset(query)
+	if err != nil {
+		return nil, err
 	}
-	body := strings.TrimSpace(query[1 : len(query)-1])
+	if err := checkTraceQLSpansetBody(body); err != nil {
+		return nil, err
+	}
+	if tail != "" {
+		return nil, checkTraceQLTail(tail)
+	}
 	if body == "" {
 		return nil, nil
-	}
-	if strings.ContainsAny(body, "{}") {
-		return nil, fmt.Errorf("tempo: multiple spansets and structural operators are not supported")
-	}
-	if hasPipeline(body) {
-		return nil, fmt.Errorf("tempo: TraceQL pipelines are not supported")
 	}
 	orParts := splitOutside(body, "||")
 	orFilters := make(orFilter, 0, len(orParts))
@@ -587,6 +584,9 @@ func parseCondition(raw string) (condition, error) {
 		}
 		c.nilValue = true
 		return c, nil
+	}
+	if _, err := unquote(value); err != nil && strings.ContainsAny(value, " \t") {
+		return condition{}, fmt.Errorf("tempo: TraceQL value %q contains spaces; quote string values", value)
 	}
 	if op == "=~" || op == "!~" {
 		pattern := value
@@ -824,30 +824,6 @@ func findOperator(s string) (string, int) {
 		}
 	}
 	return "", -1
-}
-
-func hasPipeline(s string) bool {
-	inQuote := byte(0)
-	for i := 0; i < len(s); i++ {
-		if inQuote != 0 {
-			if s[i] == '\\' {
-				i++
-				continue
-			}
-			if s[i] == inQuote {
-				inQuote = 0
-			}
-			continue
-		}
-		if s[i] == '"' || s[i] == '\'' {
-			inQuote = s[i]
-			continue
-		}
-		if s[i] == '|' && (i == 0 || s[i-1] != '|') && (i+1 >= len(s) || s[i+1] != '|') {
-			return true
-		}
-	}
-	return false
 }
 
 func splitOutside(s, separator string) []string {

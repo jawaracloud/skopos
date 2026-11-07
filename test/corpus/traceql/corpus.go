@@ -74,6 +74,10 @@ type Query struct {
 	ExpectTraceIDs     []string            `json:"expectTraceIDs,omitempty"`
 	ExpectMatchedSpans map[string][]string `json:"expectMatchedSpans,omitempty"`
 	ExpectError        bool                `json:"expectError,omitempty"`
+	// ExpectErrorContains is checked against the HTTP 400 error body when
+	// ExpectError is true. It documents which unsupported feature the query
+	// exercises without pinning the full message in the corpus.
+	ExpectErrorContains string `json:"expectErrorContains,omitempty"`
 	// SkipTempo marks gateway behavior that Tempo 2.7 does not implement (for
 	// example the nil extension). The harness still checks the gateway.
 	SkipTempo bool   `json:"skipTempo,omitempty"`

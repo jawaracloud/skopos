@@ -209,6 +209,12 @@ func runSearchComparisons(t *testing.T, c *corpus.Corpus, tempoURL string, gatew
 				if gwStatus != http.StatusBadRequest {
 					t.Fatalf("gateway status = %d, want 400: %s", gwStatus, gwBody)
 				}
+				if test.ExpectErrorContains != "" {
+					var body map[string]string
+					if err := json.Unmarshal([]byte(gwBody), &body); err != nil || !strings.Contains(body["error"], test.ExpectErrorContains) {
+						t.Fatalf("gateway error = %q, want it to contain %q", body["error"], test.ExpectErrorContains)
+					}
+				}
 				return
 			}
 			gwStatus, gw, gwBody := gatewaySearch(t, gateway, test.Query, start, end)

@@ -85,14 +85,195 @@ func TestTraceQLRegexIsAnchored(t *testing.T) {
 }
 
 func TestTraceQLRejectsUnsupported(t *testing.T) {
-	for _, query := range []string{
-		`{ } | rate()`,
-		`{ span.foo = "bar" } && { span.baz = "qux" }`,
-		`{ span.foo }`,
-	} {
-		if _, err := ParseTraceQL(query); err == nil {
-			t.Errorf("ParseTraceQL(%q) succeeded, want error", query)
-		}
+	const subset = "supported subset: one spanset { ... } with &&, || and comparison operators =, !=, =~, !~, >, <, >=, <="
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "structural child",
+			query: `{ span:name = "a" } >> { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator ">>" is not supported; ` + subset,
+		},
+		{
+			name:  "structural parent",
+			query: `{ span:name = "a" } << { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "<<" is not supported; ` + subset,
+		},
+		{
+			name:  "structural sibling",
+			query: `{ span:name = "a" } ~ { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "~" is not supported; ` + subset,
+		},
+		{
+			name:  "structural descendant",
+			query: `{ span:name = "a" } > { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator ">" is not supported; ` + subset,
+		},
+		{
+			name:  "structural ancestor",
+			query: `{ span:name = "a" } < { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "<" is not supported; ` + subset,
+		},
+		{
+			name:  "structural not child",
+			query: `{ span:name = "a" } !>> { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "!>>" is not supported; ` + subset,
+		},
+		{
+			name:  "structural not parent",
+			query: `{ span:name = "a" } !<< { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "!<<" is not supported; ` + subset,
+		},
+		{
+			name:  "structural not descendant",
+			query: `{ span:name = "a" } !> { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "!>" is not supported; ` + subset,
+		},
+		{
+			name:  "structural not ancestor",
+			query: `{ span:name = "a" } !< { span:name = "b" }`,
+			want:  `tempo: TraceQL structural operator "!<" is not supported; ` + subset,
+		},
+		{
+			name:  "multiple spansets and",
+			query: `{ span:name = "a" } && { span:name = "b" }`,
+			want:  `tempo: TraceQL multiple spansets are not supported (found "&&" between spansets); ` + subset,
+		},
+		{
+			name:  "multiple spansets or",
+			query: `{ span:name = "a" } || { span:name = "b" }`,
+			want:  `tempo: TraceQL multiple spansets are not supported (found "||" between spansets); ` + subset,
+		},
+		{
+			name:  "multiple spansets adjacent",
+			query: `{ span:name = "a" } { span:name = "b" }`,
+			want:  `tempo: TraceQL multiple spansets are not supported; ` + subset,
+		},
+		{
+			name:  "multiple spansets single ampersand",
+			query: `{ span:name = "a" } & { span:name = "b" }`,
+			want:  `tempo: TraceQL multiple spansets are not supported (found "&" between spansets); ` + subset,
+		},
+		{
+			name:  "pipeline count",
+			query: `{ span:name = "a" } | count() > 1`,
+			want:  `tempo: TraceQL pipeline "| count()" is not supported; ` + subset,
+		},
+		{
+			name:  "pipeline by",
+			query: `{ span:name = "a" } | by(span:name)`,
+			want:  `tempo: TraceQL pipeline "| by()" is not supported; ` + subset,
+		},
+		{
+			name:  "pipeline select",
+			query: `{ span:name = "a" } | select(span:name)`,
+			want:  `tempo: TraceQL pipeline "| select()" is not supported; ` + subset,
+		},
+		{
+			name:  "pipeline coalesce",
+			query: `{ span:name = "a" } | coalesce()`,
+			want:  `tempo: TraceQL pipeline "| coalesce()" is not supported; ` + subset,
+		},
+		{
+			name:  "pipeline inside spanset",
+			query: `{ span:name = "a" | count() }`,
+			want:  `tempo: TraceQL pipeline "| count()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics rate",
+			query: `{ } | rate()`,
+			want:  `tempo: TraceQL metrics query "| rate()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics count over time",
+			query: `{ } | count_over_time()`,
+			want:  `tempo: TraceQL metrics query "| count_over_time()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics quantile over time",
+			query: `{ } | quantile_over_time(duration, .99)`,
+			want:  `tempo: TraceQL metrics query "| quantile_over_time()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics histogram over time",
+			query: `{ } | histogram_over_time(duration)`,
+			want:  `tempo: TraceQL metrics query "| histogram_over_time()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics compare",
+			query: `{ } | compare()`,
+			want:  `tempo: TraceQL metrics query "| compare()" is not supported; ` + subset,
+		},
+		{
+			name:  "metrics without spanset",
+			query: `rate()`,
+			want:  `tempo: TraceQL metrics query "| rate()" is not supported; ` + subset,
+		},
+		{
+			name:  "pipeline without spanset",
+			query: `count()`,
+			want:  `tempo: TraceQL pipeline "| count()" is not supported; ` + subset,
+		},
+		{
+			name:  "grouping",
+			query: `{ (span:name = "a") }`,
+			want:  `tempo: TraceQL grouping, functions, and aggregations are not supported (found "("); ` + subset,
+		},
+		{
+			name:  "aggregation",
+			query: `{ span:count() > 1 }`,
+			want:  `tempo: TraceQL grouping, functions, and aggregations are not supported (found "("); ` + subset,
+		},
+		{
+			name:  "nested spanset",
+			query: `{ { span:name = "a" } }`,
+			want:  `tempo: TraceQL nested spansets are not supported; ` + subset,
+		},
+		{
+			name:  "unclosed spanset",
+			query: `{ span:name = "a"`,
+			want:  `tempo: TraceQL spanset is not closed: missing '}'; ` + subset,
+		},
+		{
+			name:  "trailing text",
+			query: `{ span:name = "a" } foo`,
+			want:  `tempo: TraceQL unexpected text after the spanset: "foo"; ` + subset,
+		},
+		{
+			name:  "condition without operator",
+			query: `{ span.foo }`,
+			want:  `tempo: TraceQL condition "span.foo" has no operator`,
+		},
+		{
+			name:  "unquoted value with spaces",
+			query: `{ span:name = GET /cart }`,
+			want:  `tempo: TraceQL value "GET /cart" contains spaces; quote string values`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			filter, err := ParseTraceQL(tc.query)
+			if err == nil {
+				t.Fatalf("ParseTraceQL(%q) = %#v, want error", tc.query, filter)
+			}
+			if err.Error() != tc.want {
+				t.Fatalf("ParseTraceQL(%q) error = %q, want %q", tc.query, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestTraceQLQuotedUnsupportedSyntaxIsData(t *testing.T) {
+	span := testSpan()
+	span.SpanAttributes["note"] = `{a} >> {b} | rate() ~ && || !>>`
+	filter, err := ParseTraceQL(`{ span.note = "{a} >> {b} | rate() ~ && || !>>" }`)
+	if err != nil {
+		t.Fatalf("ParseTraceQL: %v", err)
+	}
+	if !filter.Match(span) {
+		t.Fatal("filter did not match a value containing unsupported syntax")
 	}
 }
 

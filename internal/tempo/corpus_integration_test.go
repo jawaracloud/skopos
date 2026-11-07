@@ -121,9 +121,16 @@ func TestIntegrationTraceQLCorpus(t *testing.T) {
 			}
 			defer resp.Body.Close()
 			if test.ExpectError {
+				body, _ := io.ReadAll(resp.Body)
 				if resp.StatusCode != http.StatusBadRequest {
-					body, _ := io.ReadAll(resp.Body)
 					t.Fatalf("status = %d, want 400: %s", resp.StatusCode, body)
+				}
+				var payload map[string]string
+				if err := json.Unmarshal(body, &payload); err != nil || payload["error"] == "" {
+					t.Fatalf("error body = %s", body)
+				}
+				if test.ExpectErrorContains != "" && !strings.Contains(payload["error"], test.ExpectErrorContains) {
+					t.Fatalf("error = %q, want it to contain %q", payload["error"], test.ExpectErrorContains)
 				}
 				return
 			}
