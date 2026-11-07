@@ -1,20 +1,20 @@
-# Benchmarks: ClickHouse compression and gateway latency
+# Benchmarks: ClickHouse compression, gateway latency, and concurrency
 
-These numbers come from a real run on the reference host, not from estimates.
+These numbers come from real runs on the reference host, not from estimates.
 The harness is in [`test/bench`](../test/bench) and can be reproduced with one
 command.
 
-Run date: 2026-11-07 (local time). This run includes the replay-dedup
-`ReplacingMergeTree` schema and `FINAL` reads. The latency and resource tables
-below come from the cleaner of two 30-iteration runs; the earlier run had
-larger tail spikes.
+Run date: 2026-11-07 (local time). The sequential tables include the replay-dedup
+`ReplacingMergeTree` schema and `FINAL` reads. They come from the cleaner of two
+30-iteration runs; the earlier run had larger tail spikes. The 30-client
+concurrency baseline comes from a separate run on the same day and host.
 
 ## Summary
 
 | Item | Value |
 | --- | --- |
 | Dataset | 2,658,400 main-table rows + 40,000 trace-lookup rows |
-| On disk | **103.8 MiB** total (102.9 MiB main tables + 1.0 MiB lookup) |
+| On disk | **103.7-103.8 MiB** total across runs (102.8-102.9 MiB main tables + 0.9-1.0 MiB lookup) |
 | Storage cost | 24.35 B/metric sample, 110.22 B/log line, 25.44 B/span |
 | PromQL instant | p50 134-252 ms, p95 180-283 ms |
 | Tempo search | p50 592 ms, p95 701 ms |
@@ -23,7 +23,9 @@ larger tail spikes.
 | Query compute | 68.05 ClickHouse CPU-seconds for 945 SQL queries |
 | Query memory | 85.5 MiB peak per SQL query |
 | Dataset generation | 24.67 CPU-seconds, 2.2 GiB peak |
-| Gateway footprint | ~0.81 core average, 1.28 core peak, 592 MiB peak |
+| Gateway footprint (sequential) | ~0.81 core average, 1.28 core peak, 592 MiB peak |
+| **30-client baseline** | **p50 5,456.64 ms, p95 40,810.87 ms, p99 63,039.76 ms, 17.81% errors, 1.88 req/s** |
+| 30-client resource peak | Gateway 2.96 cores / 2.2 GiB, ClickHouse 1.54 cores / 953 MiB |
 
 ## Host and software
 
@@ -68,7 +70,10 @@ From the repository root:
 ```sh
 make bench
 # or
-SKOPOS_BENCH_ITERATIONS=30 ./test/bench/run.sh
+SKOPOS_BENCH_ITERATIONS=30 \
+SKOPOS_BENCH_CONCURRENCY=30 \
+SKOPOS_BENCH_CONCURRENCY_SECONDS=60 \
+./test/bench/run.sh
 ```
 
 Optional environment variables:
@@ -76,14 +81,17 @@ Optional environment variables:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SKOPOS_BENCH_ITERATIONS` | `30` | Timed iterations per query after 3 warm-ups. |
+| `SKOPOS_BENCH_CONCURRENCY` | `30` | Concurrent mixed-workload clients. Set to `0` to skip. |
+| `SKOPOS_BENCH_CONCURRENCY_SECONDS` | `60` | Target duration of the concurrent run. Set to `0` to skip. |
 | `SKOPOS_BENCH_GATEWAY_PORT` | `28082` | Host port for the gateway. |
 | `SKOPOS_BENCH_CLICKHOUSE_HTTP_PORT` | `18124` | Host port for ClickHouse HTTP. |
 | `SKOPOS_BENCH_KEEP` | `0` | Keep the stack and volume after the run. |
-| `SKOPOS_BENCH_OUTPUT` | unset | Write the raw JSON results to this path. |
+| `SKOPOS_BENCH_OUTPUT` | unset | Write JSON results here; the concurrent run uses a `-concurrent.json` suffix. |
 
-The run inserts the dataset, prints the compression tables, and then runs
-[`test/bench/bench.py`](../test/bench/bench.py) against the gateway. The script
-starts from a clean volume by default.
+The run inserts the dataset, prints the compression tables, runs the sequential
+latency loop against [`test/bench/bench.py`](../test/bench/bench.py), and then
+runs the concurrent mixed workload. The script starts from a clean volume by
+default.
 
 ## Compression results
 
@@ -197,6 +205,92 @@ are directional because the host is shared with Docker and the test runner.
 Storage also grew: metrics moved from ~8 to ~24 bytes/sample and logs from
 ~84 to ~110 bytes/line on disk.
 
+## Concurrent mixed workload (30 clients)
+
+Method: same host, dataset, and gateway build as the sequential run above. The
+harness starts a fresh stack, inserts the dataset, measures compression, runs
+the sequential loop, then starts 30 client threads. Each client cycles through
+the same 10 queries (6 PromQL, 3 TraceQL, 1 LogQL) with a one-step offset per
+client, so the workload stays mixed instead of synchronizing every client on
+the same endpoint. The target duration is 60 s; the wall clock was 77.5 s
+because requests already in flight when the deadline passed were allowed to
+finish. Latency includes connection setup, response read, and JSON decoding.
+Failed requests remain in the percentile calculation and also count toward the
+error rate. Docker CPU and memory were sampled with `docker stats --no-stream`
+at roughly 2-second intervals.
+
+Command (defaults are 30 clients and 60 seconds):
+
+```sh
+SKOPOS_BENCH_KEEP=1 SKOPOS_BENCH_OUTPUT=/tmp/bench.json ./test/bench/run.sh
+```
+
+Overall result:
+
+| Metric | Value |
+| --- | ---: |
+| Concurrent clients | 30 |
+| Target duration | 60 s |
+| Wall clock | 77.5 s |
+| Requests | 146 |
+| Throughput | 1.88 req/s |
+| Errors | 26 (17.81%) |
+| p50 | 5,456.64 ms |
+| p95 | 40,810.87 ms |
+| p99 | 63,039.76 ms |
+| mean | 14,412.90 ms |
+| On disk | 103.7 MiB (108.7 MB) |
+
+Per-query result (latency includes failed requests):
+
+| Query | Kind | Requests | Errors | Error rate | p50 ms | p95 ms | p99 ms | mean ms |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `prom_instant_count` | prom | 15 | 0 | 0.00% | 2,347.87 | 5,143.06 | 5,143.06 | 2,852.01 |
+| `prom_instant_by_service` | prom | 18 | 0 | 0.00% | 2,348.95 | 7,479.77 | 7,479.77 | 3,693.30 |
+| `prom_histogram_p95` | prom | 21 | 0 | 0.00% | 6,578.81 | 13,160.42 | 15,507.10 | 7,494.55 |
+| `prom_range_6h` | prom_range | 22 | 6 | 27.27% | 24,125.12 | 40,810.87 | 40,888.77 | 25,725.43 |
+| `prom_series` | prom | 19 | 0 | 0.00% | 3,768.45 | 7,366.11 | 7,366.11 | 4,062.97 |
+| `prom_label_values` | prom | 21 | 12 | 57.14% | 30,847.81 | 63,039.76 | 64,273.38 | 38,848.65 |
+| `tempo_search` | tempo | 3 | 3 | 100.00% | 35,438.06 | 35,799.15 | 35,799.15 | 33,774.74 |
+| `tempo_trace_by_id` | tempo | 6 | 0 | 0.00% | 597.69 | 796.18 | 796.18 | 574.72 |
+| `tempo_tags` | tempo | 9 | 5 | 55.56% | 34,672.19 | 39,845.25 | 39,845.25 | 29,380.67 |
+| `loki_query_range` | loki | 12 | 0 | 0.00% | 726.55 | 1,273.72 | 1,273.72 | 788.51 |
+
+Some per-query rows have only a handful of samples because slow requests
+consume a client for the rest of the run; their p95/p99 values are effectively
+observed maxima. Use the overall row for the contention summary.
+
+Resource use during the concurrent run:
+
+| Container | Samples | CPU avg (cores) | CPU peak (cores) | Memory avg | Memory peak |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `skopos-bench-gateway-1` | 37 | 1.61 | 2.96 | 1.4 GiB | 2.2 GiB |
+| `skopos-bench-clickhouse-1` | 37 | 0.66 | 1.54 | 407 MiB | 953 MiB |
+
+### Interpretation
+
+- **This host is saturated at 30 clients.** Gateway CPU averages 1.61 of the 4
+  available vCPUs and peaks at 2.96; ClickHouse peaks at 1.54. Combined demand
+  exceeds the host's 4 threads, so queueing, not query cost, dominates the
+  tail.
+- **The heavy endpoints fail on the gateway's 30-second HTTP write timeout.**
+  All 26 errors were `RemoteDisconnected: Remote end closed connection without
+  response` on `prom_label_values`, `prom_range_6h`, `tempo_search`, and
+  `tempo_tags`. Light endpoints still completed, but their p50 rose from tens
+  or hundreds of milliseconds sequentially to 0.6-6.6 s.
+- **Memory grows under mixed load.** The gateway averaged 1.4 GiB and peaked at
+  2.2 GiB; ClickHouse peaked at 953 MiB. Together they used about 3.2 GiB of
+  the host's 7.6 GiB, so memory did not hit a hard limit in this run. After the
+  clients stopped, the idle gateway container dropped back to roughly 5 MiB,
+  so the peak was in-flight buffering rather than a retained leak in this
+  short run.
+- **Storage is not the constraint.** The dataset remained at 103.7 MiB on disk;
+  the bottleneck is query compute and the gateway's buffering/response path.
+- **Repeatability is poor at saturation.** A second 60-second run on the same
+  warm stack produced 138 requests, 43 errors (31.16%), p50 4,930.14 ms, p95
+  40,696.69 ms, and p99 71,828.29 ms. Treat the numbers above as a saturation
+  baseline, not an SLO or a capacity estimate for server hardware.
+
 ## Resource use
 
 Measured from the same 30-iteration run with ClickHouse `system.query_log` and
@@ -254,9 +348,10 @@ Do not over-read these numbers:
 1. **Reference hardware is a laptop-class 4-thread CPU.** This host has 2
    physical cores and 7.6 GiB RAM, shared with Docker and the test runner. A
    server will produce different absolute latencies.
-2. **Single-node, single-tenant, sequential.** There is no concurrency, no
-   multi-tenant isolation, and no replication. p95 under concurrent Grafana
-   load will be worse.
+2. **Single-node, single-tenant.** Sequential and 30-client results are both
+   measured on one host with no multi-tenant isolation and no replication. The
+   30-client run saturates this 4-thread laptop-class host, so it is a
+   contention baseline, not a capacity estimate for server hardware.
 3. **Warm cache.** Data was just inserted and optimized, so ClickHouse and the
    OS page cache are warm. Cold-start and post-restart latency are not measured.
 4. **Synthetic data.** Compression depends on entropy. The generator repeats
@@ -283,3 +378,7 @@ Do not over-read these numbers:
     values; the earlier run had spikes up to ~0.8-1.1 s on queries that show
     ~180-700 ms here. Use p50 for capacity comparisons and re-run before making
     SLO claims.
+11. **Concurrency variance is large.** Two 60-second, 30-client runs produced
+    17.81% and 31.16% error rates with p99 values of 63.0 s and 71.8 s. Once
+    the host saturates, the exact mix of in-flight requests dominates. Run
+    several repetitions before comparing changes.

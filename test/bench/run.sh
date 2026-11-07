@@ -1,7 +1,7 @@
 #!/bin/sh
 # Generate the synthetic dataset, measure ClickHouse compression, and run the
-# gateway latency benchmark. Requires Docker with the Compose plugin, curl,
-# jq, and Python 3.10+.
+# sequential plus concurrent gateway latency benchmarks. Requires Docker with
+# the Compose plugin, curl, and Python 3.10+.
 set -eu
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -9,6 +9,8 @@ project=skopos-bench
 compose_file="$here/docker-compose.yml"
 gateway_url=${SKOPOS_BENCH_GATEWAY_URL:-http://127.0.0.1:${SKOPOS_BENCH_GATEWAY_PORT:-28082}}
 iterations=${SKOPOS_BENCH_ITERATIONS:-30}
+concurrency=${SKOPOS_BENCH_CONCURRENCY:-30}
+concurrency_seconds=${SKOPOS_BENCH_CONCURRENCY_SECONDS:-60}
 out=${SKOPOS_BENCH_OUTPUT:-}
 
 compose() {
@@ -45,6 +47,19 @@ docker compose version >/dev/null 2>&1 || {
   exit 1
 }
 
+case "$concurrency" in
+  ''|*[!0-9]*)
+    echo "bench: SKOPOS_BENCH_CONCURRENCY must be a non-negative integer" >&2
+    exit 1
+    ;;
+esac
+case "$concurrency_seconds" in
+  ''|*[!0-9]*)
+    echo "bench: SKOPOS_BENCH_CONCURRENCY_SECONDS must be a non-negative integer" >&2
+    exit 1
+    ;;
+esac
+
 echo "bench: rendering chart schema"
 "$here/../e2e/obi/render-schema.sh"
 
@@ -77,3 +92,23 @@ if [ -n "$out" ]; then
   set -- "$@" --json-out "$out"
 fi
 python3 "$@"
+
+if [ "$concurrency" -gt 0 ] && [ "$concurrency_seconds" -gt 0 ]; then
+  echo
+  echo "bench: concurrent mixed workload (clients=$concurrency duration=${concurrency_seconds}s)"
+  set -- "$here/bench.py" --base-url "$gateway_url" \
+    --concurrency "$concurrency" --duration "$concurrency_seconds" --warmup 1
+  containers=$(compose ps -q clickhouse gateway)
+  if [ -n "$containers" ]; then
+    # Container IDs are whitespace-separated by design.
+    # shellcheck disable=SC2086
+    set -- "$@" --docker-stats --docker-containers $containers
+  fi
+  if [ -n "$out" ]; then
+    set -- "$@" --json-out "${out%.json}-concurrent.json"
+  fi
+  python3 "$@"
+else
+  echo
+  echo "bench: concurrent workload skipped (SKOPOS_BENCH_CONCURRENCY=$concurrency SKOPOS_BENCH_CONCURRENCY_SECONDS=$concurrency_seconds)"
+fi
