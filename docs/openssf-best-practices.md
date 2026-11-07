@@ -5,13 +5,15 @@ This is a complete, honest draft for the
 level. It is not a submitted application, and it is not a claim that the badge
 has been awarded.
 
-## Status: ready to submit
+## Status: ready to submit with documented exceptions
 
 The repository is **public** at `github.com/jawaracloud/skopos` (visibility
 changed on 2026-11-01). The passing criterion `repo_public` is now met, and the
 public issue tracker, security advisory form, and commit history are
 accessible to an assessor. The badge has **not** been submitted or awarded; a
 maintainer still has to submit this draft at <https://www.bestpractices.dev/>.
+The solo-maintainer review exception below must be answered honestly rather
+than claimed as full compliance.
 
 Other known gaps that are **not** hidden by this draft:
 
@@ -20,14 +22,22 @@ Other known gaps that are **not** hidden by this draft:
   tag-only, keyless-signed, immutable release process. Release notes, unique
   version identifiers for the image, and signed-image evidence are therefore
   still pending until `v0.1.0-alpha.2` is published.
+- The passing-level review expectation is **not fully met**. The project has
+  one maintainer, so the `main-protection` ruleset requires a pull request and
+  green checks but **zero approving reviews**. This is an accepted exception,
+  not a claim of two-person review. Residual risk: no independent human review,
+  and an admin account can edit the ruleset. See
+  [openssf-scorecard.md](openssf-scorecard.md#review-exception-one-maintainer).
 - There is no independent human security review yet. This is a Gold-level
   criterion and a documented beta gate, not something this draft claims.
 - The full Prometheus compliance tester and the full Loki benchmark corpus are
   not integrated. The project has a 212-case Prometheus differential oracle and
   an 11-case Loki corpus, documented honestly in `docs/beta-gates.md`.
-- Two OSV entries exist for `golang.org/x/net` v0.60.0 in `go.sum`;
-  `govulncheck` reports no reachable vulnerabilities. See
-  [openssf-scorecard.md](openssf-scorecard.md#snapshots).
+
+Resolved in the 2026-11-07 dependency pass: `golang.org/x/net` is v0.62.0 in
+both the root module and `test/compat/prometheus`. The two OSV entries
+`GO-2026-6860` and `GO-2026-6866` are fixed, the OSV API returns no findings
+for v0.62.0, and `govulncheck v1.9.0 ./...` reports no vulnerabilities.
 
 ## Status legend
 
@@ -57,7 +67,7 @@ Other known gaps that are **not** hidden by this draft:
 | `sites_https` | Met | GitHub repository and documentation URLs are HTTPS. |
 | `discussion` | Met | GitHub Issues are enabled and URL-addressable; `.github/ISSUE_TEMPLATE/` covers bug reports and feature requests. GitHub Discussions is disabled, which is acceptable because Issues provide the required mechanism. |
 | `english` | Met | All project documentation and issue templates are in English. |
-| `maintained` | Met | Recent commits (latest 2026-11-01) and active CI. The Scorecard "created within 90 days" warning is repository age, not inactivity. |
+| `maintained` | Met | Recent commits (latest 2026-11-06) and active CI. The Scorecard "created within 90 days" warning is repository age, not inactivity. |
 
 ## Change Control
 
@@ -72,6 +82,17 @@ Other known gaps that are **not** hidden by this draft:
 | `version_tags` | Not met | Only the legacy lightweight chart tag `skopos-0.1.0-alpha.1` exists. Create an annotated `v0.1.0-alpha.2` tag and release for the first image release under the new process. |
 | `release_notes` | Not met | No image release exists. The release workflow writes notes with the image digest, chart digest, and verification commands. Publish `v0.1.0-alpha.2` and record the notes. |
 | `release_notes_vulns` | N/A | No release exists and there are no publicly known fixed vulnerabilities to list. Revisit for every release that fixes a CVE. |
+
+### Review and branch protection
+
+The `main-protection` ruleset requires a pull request, green required checks,
+linear history, and blocks force pushes and deletion. It applies to admins and
+has no bypass actors. It requires **zero approving reviews** because the project
+has one maintainer. That is an accepted exception, not a claim that independent
+review exists; do not describe this project as having two-person review until a
+second maintainer joins and the approval requirements change. The residual risk
+is recorded in
+[openssf-scorecard.md](openssf-scorecard.md#review-exception-one-maintainer).
 
 ## Reporting
 
@@ -95,7 +116,7 @@ Other known gaps that are **not** hidden by this draft:
 | `build_floss_tools` | Met | The Go toolchain, Make, and Helm are FLOSS. Docker is only needed for the optional image/release path, not for the Go build. |
 | `test` | Met | `go test ./...`, `make test`, and the test seams documented in `CONTRIBUTING.md`. |
 | `test_invocation` | Met | Standard `go test ./...` and a `make test` wrapper. |
-| `test_most` | Partial | `go test -cover ./...` on 2026-11-01: core packages 66–91% (`chclient` 73.2, `config` 80.0, `frontend` 87.2, `httpapi` 90.9, `loki` 76.5, `prom` 67.0, `sqlgen` 66.4, `tempo` 73.6), with `plan` 31.1% and `cmd/gateway` 0%. There is no coverage gate. This is a suggested criterion, not a must. |
+| `test_most` | Partial | `go test -cover ./...` on 2026-11-07: `auth` 100.0, `httpapi` 91.1, `frontend` 87.3, `semctx` 85.5, `checkpoint` 85.0, `config` 81.3, `loki` 76.5, `chclient` 73.9, `tempo` 73.6, `prom` 67.0, `sqlgen` 66.6, `plan` 31.1, `cmd/gateway` 46.3; small test helpers are lower or have no statements. There is no coverage gate. This is a suggested criterion, not a must. |
 | `test_continuous_integration` | Met | `.github/workflows/ci.yml` runs unit, race, fuzz, ClickHouse integration, PromQL oracle, Tempo/Loki differentials, cerberus, and Helm renders. |
 | `test_policy` | Met | `CONTRIBUTING.md` rules 1–4 require tests first, exact values, no silent skips, and no guessing. The PR template repeats the test requirement. |
 | `tests_are_added` | Met | Recent changes add tests: `1276021` adds LogQL pushdown tests, `860f6bd` adds frontend tests, `902a989` adds the cerberus gate. Use `git show --stat <commit>` to inspect. |
@@ -121,7 +142,7 @@ Other known gaps that are **not** hidden by this draft:
 | `crypto_random` | N/A | The gateway does not generate keys or nonces. |
 | `delivery_mitm` | Met (release pending) | Source is delivered over HTTPS GitHub; release images would use HTTPS/GHCR. No binary release exists yet, so the release path is not demonstrated. |
 | `delivery_unsigned` | N/A | Release checksums are published inside the release assets over HTTPS. The legacy chart release is keyless-signed; the first image release under the new process is pending. |
-| `vulnerabilities_fixed_60_days` | Met (caveat) | `govulncheck v1.9.0 ./...` reports "No vulnerabilities found" (no reachable vulnerable symbols). Scorecard's OSV scan flags `golang.org/x/net` v0.60.0 in `go.sum`; it is not in `vendor/modules.txt`. Update it in the next human-reviewed dependency PR. |
+| `vulnerabilities_fixed_60_days` | Met | `GO-2026-6860` (CVE-2026-78661) and `GO-2026-6866` (CVE-2026-97045), published 2026-10-27, affected `golang.org/x/net` before v0.62.0. The root module and `test/compat/prometheus` now pin v0.62.0; the fix landed on 2026-11-07, within 60 days. An OSV API query for v0.62.0 returns no findings, `govulncheck v1.9.0 ./...` reports "No vulnerabilities found," and the local Scorecard Vulnerabilities check reports 10. |
 | `vulnerabilities_critical_fixed` | N/A | No critical vulnerabilities have been reported. |
 | `no_leaked_credentials` | Met | Gitleaks v8.30.1 scanned all 27 commits and the working tree on 2026-11-01 with no leaks. GitHub secret scanning and push protection are enabled on the public repository; the repository also has private vulnerability reporting and Dependabot alerts/security updates. |
 
@@ -130,9 +151,9 @@ Other known gaps that are **not** hidden by this draft:
 | ID | Status | Evidence and action |
 | --- | --- | --- |
 | `static_analysis` | Met | `go vet ./...` runs on every push/PR. `actionlint` and `zizmor` run in the required `policy` job, and `zizmor` checks workflow permissions, template injection, and dangerous triggers. |
-| `static_analysis_common_vulnerabilities` | Met | Default CodeQL setup for Go was enabled on 2026-11-01; the first analysis completed successfully and uploads SARIF to code scanning. `govulncheck` covers dependency vulnerabilities separately. |
-| `static_analysis_fixed` | N/A | No confirmed medium-or-higher static-analysis finding is open. |
-| `static_analysis_often` | Met | `ci.yml` runs `go vet` on every push and pull request. |
+| `static_analysis_common_vulnerabilities` | Met | Default CodeQL setup for Go is configured and uploads results to code scanning. On 2026-11-07 the open-alert API returned `[]`; the latest analysis (commit `75dbcf6`, CodeQL 2.27.4) completed with 0 results across 34 rules. `govulncheck` covers dependency vulnerabilities separately. |
+| `static_analysis_fixed` | N/A | No confirmed medium-or-higher static-analysis finding is open; 0 open and 0 dismissed code-scanning alerts. |
+| `static_analysis_often` | Met | `ci.yml` runs `go vet` on every push and pull request, and default CodeQL setup analyzes pushes to `development`/`main` and pull requests. |
 | `dynamic_analysis` | Met | Unit tests, race detector, ClickHouse integration tests, SQL emitter fuzzing, OBI e2e (manual), and reference differentials. |
 | `dynamic_analysis_unsafe` | N/A | The project is Go (memory-safe). It does not compile C/C++ project code; OBI is an external container. |
 | `dynamic_analysis_enable_assertions` | Met | Tests and fuzzing run with Go assertions/panics enabled; `go test -race` is a blocking CI step. |
@@ -150,6 +171,10 @@ The most important answers to get right:
 - **Discussion:** the public GitHub Issues URL.
 - **Contribution:** `CONTRIBUTING.md`.
 - **Security:** `SECURITY.md` and the private advisory URL.
+- **Code review:** describe the solo-maintainer exception honestly. The project
+  requires PRs and green checks but zero approvals; do not claim two-person
+  review or a satisfied Code-Review criterion. See
+  [openssf-scorecard.md](openssf-scorecard.md#review-exception-one-maintainer).
 - **Build/test:** `Makefile`, `.github/workflows/ci.yml`, and the exact commands
   `make test`, `make check`.
 - **Release:** leave `version_unique`, `version_tags`, and `release_notes` as

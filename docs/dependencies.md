@@ -31,8 +31,16 @@ Transitive modules (all permissive: Apache-2.0, BSD-3-Clause, or MIT):
 | `github.com/prometheus/common` | `v0.71.0` | Apache-2.0 |
 | `github.com/prometheus/procfs` | `v0.21.1` | Apache-2.0 |
 | `go.uber.org/atomic` | `v1.11.0` | MIT |
-| `golang.org/x/sys` | `v0.48.0` | BSD-3-Clause |
-| `golang.org/x/text` | `v0.42.0` | BSD-3-Clause |
+| `golang.org/x/net` | `v0.62.0` | BSD-3-Clause |
+| `golang.org/x/sys` | `v0.49.0` | BSD-3-Clause |
+| `golang.org/x/text` | `v0.43.0` | BSD-3-Clause |
+
+`golang.org/x/net` is an indirect module required by Prometheus test
+dependencies; no `x/net` package is linked into the gateway binary. It was
+updated from v0.60.0 to v0.62.0 on 2026-11-07 to fix `GO-2026-6860` and
+`GO-2026-6866`. The Prometheus compatibility test module
+(`test/compat/prometheus`) pins the same v0.62.0 so OSV scans of both module
+graphs stay clean.
 
 LogQL and TraceQL parsers are written in-house without copying code from Loki
 or Tempo (both AGPL-3.0). No AGPL dependency is linked or vendored.
