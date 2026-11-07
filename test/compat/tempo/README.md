@@ -48,6 +48,10 @@ Docker is required. When `TEMPO_COMPAT` is not set the test skips, so
 
 ## Limitations
 
+- The corpus marks structural operators, multiple spansets, pipelines, metrics
+  queries, grouping, functions, and malformed TraceQL as `expectError`. Those
+  cases are checked against the gateway for HTTP 400 and a named-feature error
+  body; they are not sent to Tempo, which supports several of those forms.
 - Tempo 2.7.2 does not return results for TraceQL `span:id` search, and its
   tag-values endpoint returns empty for `link:traceID`; those corpus cases are
   marked `skipTempo` and are still checked against the gateway.

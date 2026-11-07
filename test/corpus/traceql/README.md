@@ -30,8 +30,17 @@ values). The gateway test still checks them.
 - `traces[].spans[]`: span name, service, kind, status, start offset (ns),
   duration (ns), resource attributes, span attributes, events, and links.
 - `queries[]`: TraceQL query, expected trace IDs, and expected matched span IDs.
-  `expectError` marks queries that must return HTTP 400.
+  `expectError` marks queries that must return HTTP 400. The optional
+  `expectErrorContains` string must appear in the HTTP 400 error body and names
+  the unsupported feature (structural operator, multiple spansets, pipeline,
+  metrics query, grouping, or malformed syntax).
 - `tagNameTests[]`: expected names for each Tempo v2 tag scope.
 - `tagValueTests[]`: expected `/api/v2/search/tag/{tag}/values` values.
 - `traceTests[]`: expected span IDs, names, root span, events, and links for
   trace-by-id.
+
+Rejected query cases are a gateway contract: they are always checked for
+HTTP 400 on the gateway and are not sent to Tempo, because Tempo supports
+several forms (structural operators, multiple spansets, pipelines, metrics)
+that the gateway intentionally rejects. The differential harness still checks
+every accepted query against Tempo.

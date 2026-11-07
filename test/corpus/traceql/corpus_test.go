@@ -47,6 +47,9 @@ func TestCorpusLoads(t *testing.T) {
 		}
 	}
 	for _, query := range c.Queries {
+		if query.ExpectErrorContains != "" && !query.ExpectError {
+			t.Fatalf("query %q has expectErrorContains without expectError", query.Name)
+		}
 		for _, id := range query.ExpectTraceIDs {
 			if !traceIDs[id] {
 				t.Fatalf("query %q expects unknown trace %s", query.Name, id)

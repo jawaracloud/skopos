@@ -63,11 +63,11 @@ ghcr.io/tsouza/cerberus:<tag> --format '{{json .RepoDigests}}'`.
 | --- | ---: | --- |
 | PromQL | 44 (36 instant, 8 range) | `promql.json` + `metrics.json` |
 | LogQL | 11 | `test/corpus/logql/corpus.json` |
-| TraceQL search | 55 | `test/corpus/traceql/corpus.json` |
+| TraceQL search | 83 | `test/corpus/traceql/corpus.json` |
 | TraceQL tag scopes | 5 scopes in 1 check | same corpus |
 | TraceQL tag values | 10 | same corpus |
 | TraceQL trace-by-id | 3 | same corpus |
-| **Total** | **124 checks** | |
+| **Total** | **152 checks** | |
 
 PromQL covers selectors and regex matchers, `rate`/`increase`, classic
 `histogram_quantile`, histogram `_count`/`_sum`, summary quantiles/count/sum,
@@ -127,22 +127,22 @@ aggregation, a metric value, a matched span set, a tag name/value, or an event
 or link is printed as a unified diff. The harness prints every case with
 `--verbose` and every failure by default.
 
-## Current result on this host (2026-11-01)
+## Current result on this host (2026-11-07)
 
-Docker 29.9.2, Compose 5.6.1, kernel 6.18.55, x86_64.
+Docker 29.9.3, Compose 5.7.0, kernel 6.18.55, x86_64.
 
 ```text
-summary: 124 cases; 85 pass; 39 known cerberus gaps; 0 cerberus regressions; 0 fixed baseline entries; 0 Skopos divergences
+summary: 152 cases; 96 pass; 56 known cerberus gaps; 0 cerberus regressions; 0 fixed baseline entries; 0 Skopos divergences
 ok: Skopos matches the reference on every corpus case
 ```
 
 The gate is zero for Skopos against the reference, and zero against cerberus on
 every case where cerberus implements the feature. Cerberus v1.23.1 diverges on
-39 checks; every one was traced to cerberus behavior, not to Skopos or the
+56 checks; every one was traced to cerberus behavior, not to Skopos or the
 corpus. The exact case keys are pinned in `known-cerberus-gaps.json`: a new
 cerberus divergence fails the gate as `CERBERUS_REGRESSION`, and a documented
 gap that starts passing fails as `CERBERUS_FIXED` until the baseline is updated.
-The next section groups the 39 by root cause with a reproducer.
+The next section groups the 56 by root cause with a reproducer.
 
 ## Known cerberus gaps
 
@@ -227,20 +227,23 @@ Skopos; cerberus returns an empty trace list.
 
 Affected: `event time since start`.
 
-### 6. TraceQL unsupported-construct error parity (6 checks)
+### 6. TraceQL unsupported-construct error parity (23 checks)
 
-The corpus marks pipelines, structural operators, multiple spansets, metrics
-queries, unknown span intrinsics, and instrumentation attributes as explicit
-errors. Tempo 2.7 and Skopos return HTTP 400. Cerberus returns HTTP 200 with an
-empty result (the metrics query even returns a synthetic `|...` trace ID).
-
-Affected: `pipeline rejected`, `structural rejected`,
-`multiple spansets rejected`, `metrics rejected`,
-`unknown span intrinsic rejected`, `instrumentation attributes rejected`.
+The corpus marks structural operators, multiple spansets, pipelines, metrics
+queries, grouping, unknown span intrinsics, and instrumentation attributes as
+explicit errors. Tempo 2.7 and Skopos return HTTP 400 with a named-feature
+error. Cerberus returns HTTP 200 instead, either with an empty result, matched
+traces, or a synthetic metrics trace ID. The exact 23 keys are pinned in
+`known-cerberus-gaps.json`; examples:
 
 ```sh
 curl -s -o /dev/null -w '%{http_code}\n' -G localhost:18092/api/search \
   --data-urlencode 'q={ } >> { span:name = "GET /cart" }' \
+  --data-urlencode start=1793491140 --data-urlencode end=1793491800
+# cerberus 200; Tempo and Skopos 400
+
+curl -s -o /dev/null -w '%{http_code}\n' -G localhost:18092/api/search \
+  --data-urlencode 'q={ span:name = "GET /cart" } | count() > 1' \
   --data-urlencode start=1793491140 --data-urlencode end=1793491800
 # cerberus 200; Tempo and Skopos 400
 ```
@@ -296,7 +299,7 @@ the normalizer ignores them:
 | `seed/main.go` | Renders the chart schema, seeds logs/traces/metrics, writes OpenMetrics. Reuses `test/corpus/traceql`. |
 | `metrics.json` | Deterministic metric fixture (gauges, counter, histogram, summary). |
 | `promql.json` | 44 PromQL cases with the instant/range evaluation times. |
-| `known-cerberus-gaps.json` | Exact baseline of the 39 documented cerberus divergences. |
+| `known-cerberus-gaps.json` | Exact baseline of the 56 documented cerberus divergences. |
 | `harness.py` | Normalization, three-way comparison, exact diffs, baseline check, and reporting. |
 
 The harness is manual by default only in the sense that it is not run on every

@@ -146,6 +146,9 @@ func TestCorpusSearchAPI(t *testing.T) {
 				if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil || body["error"] == "" {
 					t.Fatalf("error body = %s", rec.Body)
 				}
+				if test.ExpectErrorContains != "" && !strings.Contains(body["error"], test.ExpectErrorContains) {
+					t.Fatalf("error = %q, want it to contain %q", body["error"], test.ExpectErrorContains)
+				}
 				return
 			}
 			if rec.Code != http.StatusOK {

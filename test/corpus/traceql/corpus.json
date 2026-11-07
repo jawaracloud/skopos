@@ -599,44 +599,225 @@
       "note": "Tempo 2.7 rejects nil; this is a gateway extension"
     },
     {
-      "name": "pipeline rejected",
-      "query": "{ span:name = \"GET /cart\" } | count() > 1",
-      "expectError": true
+      "name": "and binds tighter than or",
+      "query": "{ span.http.status_code >= 400 && span.http.status_code < 600 || span:name = \"GET /cart\" }",
+      "expectTraceIDs": [
+        "4bf92f3577b34da6a3ce929d0e0e4736",
+        "5bf92f3577b34da6a3ce929d0e0e4737"
+      ],
+      "expectMatchedSpans": {
+        "4bf92f3577b34da6a3ce929d0e0e4736": ["00f067aa0ba902b7"],
+        "5bf92f3577b34da6a3ce929d0e0e4737": ["10f067aa0ba902b7"]
+      }
     },
     {
-      "name": "structural rejected",
-      "query": "{ } >> { span:name = \"GET /cart\" }",
-      "expectError": true
+      "name": "quoted structural syntax is a value",
+      "query": "{ span:name = \"GET /cart >> { span:name } | rate()\" }",
+      "expectTraceIDs": []
     },
     {
-      "name": "multiple spansets rejected",
+      "name": "structural child rejected",
+      "query": "{ span:name = \"GET /cart\" } >> { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \">>\""
+    },
+    {
+      "name": "structural parent rejected",
+      "query": "{ span:name = \"GET /cart\" } << { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"<<\""
+    },
+    {
+      "name": "structural sibling rejected",
+      "query": "{ span:name = \"GET /cart\" } ~ { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"~\""
+    },
+    {
+      "name": "structural descendant rejected",
+      "query": "{ span:name = \"GET /cart\" } > { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \">\""
+    },
+    {
+      "name": "structural ancestor rejected",
+      "query": "{ span:name = \"GET /cart\" } < { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"<\""
+    },
+    {
+      "name": "structural not child rejected",
+      "query": "{ span:name = \"GET /cart\" } !>> { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"!>>\""
+    },
+    {
+      "name": "structural not parent rejected",
+      "query": "{ span:name = \"GET /cart\" } !<< { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"!<<\""
+    },
+    {
+      "name": "structural not descendant rejected",
+      "query": "{ span:name = \"GET /cart\" } !> { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"!>\""
+    },
+    {
+      "name": "structural not ancestor rejected",
+      "query": "{ span:name = \"GET /cart\" } !< { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \"!<\""
+    },
+    {
+      "name": "structural inside spanset rejected",
+      "query": "{ span:name = \"GET /cart\" >> span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "structural operator \">>\""
+    },
+    {
+      "name": "multiple spansets and rejected",
       "query": "{ span:name = \"GET /cart\" } && { span:name = \"GET /checkout\" }",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "multiple spansets"
     },
     {
-      "name": "metrics rejected",
+      "name": "multiple spansets or rejected",
+      "query": "{ span:name = \"GET /cart\" } || { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "multiple spansets"
+    },
+    {
+      "name": "multiple spansets adjacent rejected",
+      "query": "{ span:name = \"GET /cart\" } { span:name = \"GET /checkout\" }",
+      "expectError": true,
+      "expectErrorContains": "multiple spansets"
+    },
+    {
+      "name": "pipeline count rejected",
+      "query": "{ span:name = \"GET /cart\" } | count() > 1",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| count()\""
+    },
+    {
+      "name": "pipeline by rejected",
+      "query": "{ span:name = \"GET /cart\" } | by(span:name)",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| by()\""
+    },
+    {
+      "name": "pipeline select rejected",
+      "query": "{ span:name = \"GET /cart\" } | select(span:name)",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| select()\""
+    },
+    {
+      "name": "pipeline coalesce rejected",
+      "query": "{ span:name = \"GET /cart\" } | coalesce()",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| coalesce()\""
+    },
+    {
+      "name": "pipeline inside spanset rejected",
+      "query": "{ span:name = \"GET /cart\" | count() }",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| count()\""
+    },
+    {
+      "name": "metrics rate rejected",
       "query": "{ } | rate()",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| rate()\""
+    },
+    {
+      "name": "metrics count over time rejected",
+      "query": "{ } | count_over_time()",
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| count_over_time()\""
+    },
+    {
+      "name": "metrics quantile over time rejected",
+      "query": "{ } | quantile_over_time(duration, .99)",
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| quantile_over_time()\""
+    },
+    {
+      "name": "metrics histogram over time rejected",
+      "query": "{ } | histogram_over_time(duration)",
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| histogram_over_time()\""
+    },
+    {
+      "name": "metrics compare rejected",
+      "query": "{ } | compare()",
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| compare()\""
+    },
+    {
+      "name": "metrics without spanset rejected",
+      "query": "rate()",
+      "expectError": true,
+      "expectErrorContains": "metrics query \"| rate()\""
+    },
+    {
+      "name": "pipeline without spanset rejected",
+      "query": "count()",
+      "expectError": true,
+      "expectErrorContains": "pipeline \"| count()\""
+    },
+    {
+      "name": "grouping rejected",
+      "query": "{ (span:name = \"GET /cart\") }",
+      "expectError": true,
+      "expectErrorContains": "grouping, functions, and aggregations"
+    },
+    {
+      "name": "aggregation rejected",
+      "query": "{ span:count() > 1 }",
+      "expectError": true,
+      "expectErrorContains": "grouping, functions, and aggregations"
+    },
+    {
+      "name": "nested spanset rejected",
+      "query": "{ { span:name = \"GET /cart\" } }",
+      "expectError": true,
+      "expectErrorContains": "nested spansets"
+    },
+    {
+      "name": "trailing text rejected",
+      "query": "{ span:name = \"GET /cart\" } foo",
+      "expectError": true,
+      "expectErrorContains": "unexpected text after the spanset"
+    },
+    {
+      "name": "unquoted value with spaces rejected",
+      "query": "{ span:name = GET /cart }",
+      "expectError": true,
+      "expectErrorContains": "contains spaces; quote string values"
     },
     {
       "name": "unknown trace intrinsic rejected",
       "query": "{ trace:foo = \"bar\" }",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "unsupported trace intrinsic"
     },
     {
       "name": "unknown span intrinsic rejected",
       "query": "{ span:childCount > 1 }",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "unsupported span intrinsic"
     },
     {
       "name": "instrumentation attributes rejected",
       "query": "{ instrumentation.language = \"go\" }",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "instrumentation attributes are not supported"
     },
     {
       "name": "unbalanced query rejected",
       "query": "{ span:name = \"GET /cart\"",
-      "expectError": true
+      "expectError": true,
+      "expectErrorContains": "spanset is not closed"
     }
   ],
   "tagNameTests": [
